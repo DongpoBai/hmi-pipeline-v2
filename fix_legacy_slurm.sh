@@ -1,0 +1,134 @@
+#!/bin/bash
+# ==============================================================================
+# fix_legacy_slurm.sh — Fix generated SLURM files after prep scripts
+#
+# Legacy prep scripts (prepmavgrenorm, prepfit) generate SLURM/srun files
+# with missing bind mounts, old /project/ paths, and no module load.
+# Run this after each prep step to patch them automatically.
+#
+# Usage:
+#   ./fix_legacy_slurm.sh --run 80 --part mavg    # Fix Part 2 SLURM files
+#   ./fix_legacy_slurm.sh --run 80 --part fit      # Fix Part 3 SLURM/srun files
+#   ./fix_legacy_slurm.sh --run 80 --part all      # Fix both
+#   ./fix_legacy_slurm.sh --run 80 --part all --dry-run
+# ==============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+# Parse args
+PART=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --run)      RUN_NUMBER="$2"; shift 2 ;;
+        --part)     PART="$2"; shift 2 ;;
+        --dry-run)  DRY_RUN=true; shift ;;
+        --config)   CONFIG_FILE="$2"; shift 2 ;;
+        --help|-h)
+            echo "Usage: $0 --run RR --part {mavg|fit|all} [--dry-run] [--config FILE]"
+            exit 0 ;;
+        *) echo "Unknown arg: $1"; exit 1 ;;
+    esac
+done
+
+if [[ -z "${RUN_NUMBER:-}" || -z "$PART" ]]; then
+    echo "ERROR: --run and --part are required"
+    exit 1
+fi
+
+# Load config
+CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/config/run${RUN_NUMBER}.conf}"
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+else
+    echo "ERROR: Config not found: $CONFIG_FILE"
+    exit 1
+fi
+
+RUN_NUMBER_PAD=$(printf "%02d" "$RUN_NUMBER")
+MDIDN="${MDIDN:-$(echo "6256 + ($RUN_NUMBER * 72)" | bc)}"
+
+DR_LIST="${PROJECT_BASE}/rcf-57/astro0/data/run${RUN_NUMBER_PAD}.dateranges.lst"
+if [[ ! -f "$DR_LIST" ]]; then
+    echo "ERROR: Date range list not found: $DR_LIST"
+    exit 1
+fi
+
+BINDS="--bind /project2/erhodes_44:/home --bind /project2/erhodes_44/rcf-57:/rcf-57 --bind /project2/erhodes_44/rcf-04:/rcf-04 --bind /project2/erhodes_44/rcf-93:/rcf-93 --bind /scratch1:/scratch1"
+
+fix_count=0
+
+# ── Fix Part 2 (mavg) SLURM files ────────────────────────────────────────────
+fix_mavg() {
+    echo "=== Fixing Part 2 (mavg/psdr) SLURM files for Run ${RUN_NUMBER} ==="
+    local data_dir="${PROJECT_BASE}/rcf-57/astro0/data"
+
+    while read dr; do
+        local dir="${data_dir}/avgspc2880.wtnonavgcorrall.${dr}dpirlnewrr.hpcc"
+        for f in "${dir}"/sbatch*.slurm; do
+            [[ -f "$f" ]] || continue
+            # Check if already has bind mounts
+            if ! grep -q 'bind.*project2.*:/home' "$f" 2>/dev/null; then
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    echo "  [DRY] Would fix: $(basename $f) in $dr"
+                else
+                    sed -i 's|singularity exec $cont|singularity exec '"${BINDS}"' $cont|' "$f"
+                    echo "  Fixed: $(basename $f) in $dr"
+                fi
+                fix_count=$((fix_count + 1))
+            fi
+        done
+    done < "$DR_LIST"
+}
+
+# ── Fix Part 3 (fitting) SLURM/srun files ────────────────────────────────────
+fix_fit() {
+    echo "=== Fixing Part 3 (fitting) files for Run ${RUN_NUMBER} ==="
+    local theor="${PROJECT_BASE}/rcf-04/astro10/wmltp/theor1.0"
+
+    while read dr; do
+        local dir="${theor}/weightedhmi${dr}dpirlnewrr/fdxref61/lgcfnonncorall96b2b4rev6asm"
+        [[ -d "$dir" ]] || continue
+
+        # Fix /project/ → /project2/ in all script files
+        for f in "${dir}"/fitjob*.slurm "${dir}"/fitjob*.srun "${dir}"/xwmltp*.sh "${dir}"/qsubfitjob*.sh; do
+            [[ -f "$f" ]] || continue
+            if grep -q '/project/erhodes_44' "$f" 2>/dev/null; then
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    echo "  [DRY] Would fix path: $(basename $f) in $dr"
+                else
+                    sed -i 's|/project/erhodes_44|/project2/erhodes_44|g' "$f"
+                    echo "  Fixed path: $(basename $f) in $dr"
+                fi
+                fix_count=$((fix_count + 1))
+            fi
+        done
+
+        # Add module load to .srun files (if not already present)
+        for f in "${dir}"/fitjob*dpirlnewrr.rev6.srun; do
+            [[ -f "$f" ]] || continue
+            if ! grep -q 'module load apptainer' "$f" 2>/dev/null; then
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    echo "  [DRY] Would add module load: $(basename $f) in $dr"
+                else
+                    sed -i 's|source /project2/erhodes_44/rcf-04/astro10/singularity/images/slurm.bashrc|source /project2/erhodes_44/rcf-04/astro10/singularity/images/slurm.bashrc\nsource /etc/profile.d/modules.sh\nmodule load apptainer/1.3.6|' "$f"
+                    echo "  Added module load: $(basename $f) in $dr"
+                fi
+                fix_count=$((fix_count + 1))
+            fi
+        done
+    done < "$DR_LIST"
+}
+
+# ── Run fixes ─────────────────────────────────────────────────────────────────
+case "$PART" in
+    mavg) fix_mavg ;;
+    fit)  fix_fit ;;
+    all)  fix_mavg; echo ""; fix_fit ;;
+    *)    echo "ERROR: --part must be mavg, fit, or all"; exit 1 ;;
+esac
+
+echo ""
+echo "Done. ${fix_count} files fixed."

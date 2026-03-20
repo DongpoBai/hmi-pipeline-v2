@@ -1,0 +1,17 @@
+# Pipeline runtime artifacts
+logs/
+checkpoints/
+testenv/
+
+# Temporary FITS files
+*.fits
+
+# Editor backups
+*~
+*.swp
+*.swo
+\#*\#
+
+# OS
+.DS_Store
+Thumbs.db

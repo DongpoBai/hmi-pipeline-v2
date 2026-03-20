@@ -1,0 +1,7 @@
+# Force LF line endings for all text files (scripts run on Linux HPC)
+* text=auto eol=lf
+
+# Explicitly mark binary files
+*.fits binary
+*.sif binary
+*.gz binary

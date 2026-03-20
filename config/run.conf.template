@@ -1,0 +1,51 @@
+# ==============================================================================
+# Run Configuration Template — pipeline-v2
+#
+# Copy this file to run${RUN_NUMBER}.conf and fill in the values.
+# Usage: cp run.conf.template run74.conf && emacs run74.conf
+# ==============================================================================
+
+# ── Run identification ──────────────────────────────────────────────────────
+# Run number (integer, no leading zero)
+RUN_NUMBER=
+
+# Starting MDI Day Number for this run
+MDIDN=
+
+# Number of 3-day sets in this run (typically 24 for HMI)
+SETL=24
+
+# Instrument (lowercase)
+INSTRUMENT=hmi
+
+# ── Paths ───────────────────────────────────────────────────────────────────
+# These defaults should work for most cases. Override only if needed.
+PROJECT_BASE=/project2/erhodes_44
+SCRATCH_BASE=/scratch1/dongpoba
+
+# Container image
+CONTAINER_IMAGE=/project2/erhodes_44/rcf-04/astro10/singularity/images/spscratch/restore_centos7.2405291154.sif_03_06_2025
+
+# ── Date ranges ─────────────────────────────────────────────────────────────
+# After running genDRlist, paste all 24 date ranges here.
+# These are in YYMMDDtoMMDD format, one per line in the array.
+# Example for a hypothetical run:
+#   DATE_RANGES=(
+#       "240101to0103"
+#       "240104to0106"
+#       ...
+#   )
+# If left empty, the wrapper will attempt to read them from the generated
+# runRR.dateranges.lst file.
+DATE_RANGES=(
+)
+
+# ── Tuning (optional) ──────────────────────────────────────────────────────
+# SLURM polling interval (seconds)
+# SLURM_POLL_INTERVAL=30
+
+# SLURM timeout for m-averaging jobs (seconds, default 1800 = 30 min)
+# MAVG_TIMEOUT=1800
+
+# SLURM timeout for psdrenorm jobs (seconds, default 600 = 10 min)
+# PSDR_TIMEOUT=600
