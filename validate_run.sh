@@ -34,6 +34,7 @@ BRIEF=false
 PARTS_TO_CHECK=()    # empty = all
 BATCH_START=""
 BATCH_END=""
+OUTPUT_FILE=""       # --output file.txt
 
 # ── Colors (auto-disable if not a terminal) ──────────────────────────────────
 if [[ -t 1 ]]; then
@@ -61,6 +62,7 @@ usage() {
     echo "  --verbose       Show per-daterange detail for every Part"
     echo "  --brief         One-line summary per Part, no detail"
     echo "  --batch S E     Quick table for runs S through E (e.g. --batch 1 80)"
+    echo "  --output FILE   Save batch report to FILE (plain text, no colors)"
     echo "  --base PATH     Override PROJECT_BASE (default: /project2/erhodes_44)"
     echo "  --help          Show this help"
     exit 2
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         --verbose)  VERBOSE=true; shift ;;
         --brief)    BRIEF=true; shift ;;
         --batch)    BATCH_START="$2"; BATCH_END="$3"; shift 3 ;;
+        --output)   OUTPUT_FILE="$2"; shift 2 ;;
         --base)     PROJECT_BASE="$2"; shift 2 ;;
         --help|-h)  usage ;;
         *)          echo "ERROR: Unknown argument: $1"; usage ;;
@@ -112,10 +115,28 @@ SAMPLE_VAR_DIRS=("freqrats_asymrlnew86_hmi" "widthrats_asymrlnew86_hmi")
 # BATCH MODE: quick table for multiple runs
 # ==============================================================================
 if [[ -n "$BATCH_START" ]]; then
+
+    # If --output, start the file with a header
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        {
+            echo "HMI 3-Day Pipeline Status Report"
+            echo "Generated: $(date '+%Y-%m-%d %H:%M') on $(hostname)"
+            echo "Runs: ${BATCH_START}–${BATCH_END}"
+            echo ""
+            echo "P1=Raw Spectra  P2=M-Avg/Renorm  P3=Fitting  P4=Conv/Sub/Bin  P5=Activity  P6=Regression/ZeroCross"
+            echo ""
+        } > "$OUTPUT_FILE"
+    fi
+
+    # Table header
+    hdr=$(printf "%-5s %-7s  %-6s %-6s %-6s %-6s %-6s %-6s  %s" \
+        "Run" "MDIDN" "P1" "P2" "P3" "P4" "P5" "P6" "Status")
+    sep="───── ───────  ────── ────── ────── ────── ────── ──────  ──────────"
+
     echo ""
-    printf "${C_BOLD}%-5s %-7s  %-6s %-6s %-6s %-6s %-6s %-6s  %s${C_RESET}\n" \
-        "Run" "MDIDN" "P1" "P2" "P3" "P4" "P5" "P6" "Status"
-    printf "%s\n" "───── ───────  ────── ────── ────── ────── ────── ──────  ──────────"
+    echo -e "${C_BOLD}${hdr}${C_RESET}"
+    echo "$sep"
+    [[ -n "$OUTPUT_FILE" ]] && { echo "$hdr"; echo "$sep"; } >> "$OUTPUT_FILE"
 
     all_done=0; total_runs=0
     for rr in $(seq "$BATCH_START" "$BATCH_END"); do
@@ -160,24 +181,22 @@ if [[ -n "$BATCH_START" ]]; then
             [[ $pc -ge 26 ]] && p2_ok=true
         fi
 
-        # Format cells (plain text, no color inside cells for alignment)
+        # Format cells
         c_p1="--"
         $p2_ok   && c_p2="PASS" || c_p2="----"
-        # P3: infer from P6 (can't do regression without fitting)
         [[ $p6_ok -eq 13 ]] && c_p3="(ok)" || c_p3="----"
         [[ $p4_ok -eq 2 ]] && c_p4="PASS" || { [[ $p4_ok -gt 0 ]] && c_p4="PART" || c_p4="----"; }
         $p5_ok   && c_p5="PASS" || c_p5="----"
         [[ $p6_ok -eq 13 ]] && c_p6="PASS" || c_p6="----"
+        [[ $p6_ok -eq 13 ]] && c_status="DONE" || c_status="INCOMPLETE"
 
-        # Overall status
-        if [[ $p6_ok -eq 13 ]]; then
-            c_status="${C_GREEN}DONE${C_RESET}"
-            all_done=$((all_done + 1))
-        else
-            c_status="${C_RED}INCOMPLETE${C_RESET}"
-        fi
+        [[ "$c_status" == "DONE" ]] && all_done=$((all_done + 1))
 
-        # Colorize cells for output
+        # Plain-text row (for file)
+        row=$(printf "%-5s %-7s  %-6s %-6s %-6s %-6s %-6s %-6s  %s" \
+            "$rr" "$lmdidn" "$c_p1" "$c_p2" "$c_p3" "$c_p4" "$c_p5" "$c_p6" "$c_status")
+
+        # Terminal output (with colors)
         colorize() { [[ "$1" == "PASS" || "$1" == "(ok)" ]] && echo -ne "${C_GREEN}${1}${C_RESET}" || echo -ne "${C_RED}${1}${C_RESET}"; }
 
         printf "%-5s %-7s  " "$rr" "$lmdidn"
@@ -187,11 +206,23 @@ if [[ -n "$BATCH_START" ]]; then
         echo -ne "$(colorize "$c_p4")  "
         echo -ne "$(colorize "$c_p5")  "
         echo -ne "$(colorize "$c_p6")  "
-        echo -e "  $c_status"
+        [[ "$c_status" == "DONE" ]] && echo -e "  ${C_GREEN}DONE${C_RESET}" || echo -e "  ${C_RED}INCOMPLETE${C_RESET}"
+
+        # File output (plain text)
+        [[ -n "$OUTPUT_FILE" ]] && echo "$row" >> "$OUTPUT_FILE"
     done
 
+    summary="Total: ${all_done} DONE out of ${total_runs} runs"
     echo ""
-    echo -e "${C_BOLD}Total: ${all_done} DONE out of ${total_runs} runs${C_RESET}"
+    echo -e "${C_BOLD}${summary}${C_RESET}"
+
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        echo "" >> "$OUTPUT_FILE"
+        echo "$summary" >> "$OUTPUT_FILE"
+        echo ""
+        echo -e "  ${C_GREEN}✓${C_RESET} Report saved to: ${OUTPUT_FILE}"
+    fi
+
     exit 0
 fi
 
