@@ -1,18 +1,28 @@
 #!/bin/bash
 # ==============================================================================
-# validate_run.sh — Unified HMI 3-Day Pipeline Validation
+# validate_run.sh — Unified HMI Pipeline Validation (3-day + 72-day spectra)
 #
-# Checks all output files from Part 1 through Part 6 for a given run number.
+# Checks output files from Part 1 through Part 6 for a given run number.
 # Reports per-part status with file counts and a final summary.
 #
 # Usage:
-#   ./validate_run.sh --run 80
+#   ./validate_run.sh --run 80                       # 3-day full pipeline (default)
+#   ./validate_run.sh --run 79 --mode 72day --part 1 # 72-day raw spectra only
+#   ./validate_run.sh --run 79 --mode both           # 3-day full + 72-day spectra
 #   ./validate_run.sh --run 80 --config config/run80.conf
-#   ./validate_run.sh --run 80 --part 2           # check only Part 2
-#   ./validate_run.sh --run 80 --part 3 --part 4  # check Parts 3 and 4
-#   ./validate_run.sh --run 80 --verbose           # show every daterange detail
-#   ./validate_run.sh --run 80 --brief             # one line per Part, no detail
-#   ./validate_run.sh --batch 1 80                 # quick table for Rhodes
+#   ./validate_run.sh --run 80 --part 2              # check only Part 2
+#   ./validate_run.sh --run 80 --part 3 --part 4     # check Parts 3 and 4
+#   ./validate_run.sh --run 80 --verbose             # show every daterange detail
+#   ./validate_run.sh --run 80 --brief               # one line per Part, no detail
+#   ./validate_run.sh --batch 1 80                   # quick table for Rhodes (3-day)
+#   ./validate_run.sh --run 79 --mode 72day --dr72 YYMMDDtoMMDD   # explicit 72-day DR
+#
+# --mode:
+#   3day   (default)  full 3-day pipeline, Parts 1-6 — UNCHANGED from prior version
+#   72day             72-day SPECTRA only (Parts 1 & 2); 3-6 are 3-day-specific
+#   both              3-day full pipeline + 72-day spectra side by side
+#
+# 72-day daterange resolution priority:  --dr72  >  DATE_RANGE_72 (config)  >  auto-discover
 #
 # Requires: config file with DATE_RANGES array, or auto-discovers from filesystem.
 # Does NOT require the Singularity container — all checks are plain filesystem reads.
@@ -35,6 +45,8 @@ PARTS_TO_CHECK=()    # empty = all
 BATCH_START=""
 BATCH_END=""
 OUTPUT_FILE=""       # --output file.txt
+MODE="3day"          # 3day | 72day | both
+DR72=""              # explicit 72-day daterange (overrides config/auto-discover)
 
 # ── Colors (auto-disable if not a terminal) ──────────────────────────────────
 if [[ -t 1 ]]; then
@@ -53,10 +65,12 @@ header(){ echo -e "\n${C_BOLD}═══ $* ═══${C_RESET}"; }
 
 # ── Parse CLI ────────────────────────────────────────────────────────────────
 usage() {
-    echo "Usage: $0 --run RR [--config FILE] [--part N ...] [--verbose] [--brief]"
-    echo "       $0 --batch START END        Quick table for runs START..END"
+    echo "Usage: $0 --run RR [--mode 3day|72day|both] [--config FILE] [--part N ...] [--verbose] [--brief]"
+    echo "       $0 --batch START END        Quick table for runs START..END (3-day)"
     echo ""
     echo "  --run RR        Run number (required unless --batch)"
+    echo "  --mode M        3day (default) | 72day | both"
+    echo "  --dr72 DR       Explicit 72-day daterange (YYMMDDtoMMDD); overrides auto-discover"
     echo "  --config FILE   Config file with DATE_RANGES array (auto-detected if omitted)"
     echo "  --part N        Check only Part N (repeatable; default: all)"
     echo "  --verbose       Show per-daterange detail for every Part"
@@ -71,6 +85,8 @@ usage() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --run)      RUN_NUMBER="$2"; shift 2 ;;
+        --mode)     MODE="$2"; shift 2 ;;
+        --dr72)     DR72="$2"; shift 2 ;;
         --config)   CONFIG_FILE="$2"; shift 2 ;;
         --part)     PARTS_TO_CHECK+=("$2"); shift 2 ;;
         --verbose)  VERBOSE=true; shift ;;
@@ -82,6 +98,16 @@ while [[ $# -gt 0 ]]; do
         *)          echo "ERROR: Unknown argument: $1"; usage ;;
     esac
 done
+
+# ── Validate mode ────────────────────────────────────────────────────────────
+case "$MODE" in
+    3day|72day|both) ;;
+    *) echo "ERROR: --mode must be one of: 3day | 72day | both (got '$MODE')"; usage ;;
+esac
+# Convenience flags for which spectra family to evaluate
+NEED_3DAY=false; NEED_72DAY=false
+[[ "$MODE" == "3day"  || "$MODE" == "both" ]] && NEED_3DAY=true
+[[ "$MODE" == "72day" || "$MODE" == "both" ]] && NEED_72DAY=true
 
 # ── Key paths (used by both single-run and batch) ────────────────────────────
 WMLTP_BASE="${PROJECT_BASE}/rcf-04/astro10/wmltp/theor1.0"
@@ -111,8 +137,76 @@ ZC_VARS=(nudiffs nurats amprats amprat2 ampdiffs powrats powrat2 powdiffs wirats
 # 2 representative variable dirs for quick Part 4 check in batch mode
 SAMPLE_VAR_DIRS=("freqrats_asymrlnew86_hmi" "widthrats_asymrlnew86_hmi")
 
+# ── MDIDN → 72-day daterange (deterministic) ─────────────────────────────────
+# MDIDN is a plain day counter (1 unit = 1 calendar day). Anchor below was read
+# off the live filesystem and verified to reproduce two independent runs:
+#     Run 78  MDIDN 11872 -> 250704to0913   (observed on disk)
+#     Run 79  MDIDN 11944 -> 250914to1124   (observed on disk)
+# The 72-day window is [start, start+71] inclusive; dir name is YYMMDD"to"MMDD.
+# If a particular run ever used a nonstandard dir name, override with --dr72.
+DR72_ANCHOR_MDIDN=11872
+DR72_ANCHOR_DATE="2025-07-04"
+dr72_for_mdidn() {
+    local mdidn=$1
+    local off=$(( mdidn - DR72_ANCHOR_MDIDN ))
+    local s e
+    s=$(date -d "${DR72_ANCHOR_DATE} ${off} days" +%y%m%d 2>/dev/null) || { echo ""; return 1; }
+    e=$(date -d "${DR72_ANCHOR_DATE} $((off + 71)) days" +%m%d 2>/dev/null) || { echo ""; return 1; }
+    echo "${s}to${e}"
+}
+
 # ==============================================================================
-# BATCH MODE: quick table for multiple runs
+# BATCH MODE (72-day spectra): compact one-row-per-run table for Part 1
+# ==============================================================================
+if [[ -n "$BATCH_START" && "$MODE" == "72day" ]]; then
+    SPECTRA_BASE="${PROJECT_BASE}/rcf-93/data/spc/hmi"
+
+    hdr=$(printf "%-5s %-7s  %-16s %-9s  %s" "Run" "MDIDN" "72day daterange" "P1 files" "Status")
+    sep="───── ───────  ──────────────── ─────────  ──────────"
+    echo ""
+    echo -e "${C_BOLD}${hdr}${C_RESET}"
+    echo "$sep"
+
+    if [[ -n "$OUTPUT_FILE" ]]; then
+        {
+            echo "HMI 72-Day Raw Spectra (Part 1) Status"
+            echo "Generated: $(date '+%Y-%m-%d %H:%M') on $(hostname)"
+            echo "Runs: ${BATCH_START}–${BATCH_END}"
+            echo ""
+            echo "$hdr"; echo "$sep"
+        } > "$OUTPUT_FILE"
+    fi
+
+    for rr in $(seq "$BATCH_START" "$BATCH_END"); do
+        lmdidn=$(( 6256 + rr * 72 ))
+        dr=$(dr72_for_mdidn "$lmdidn")
+        dir="${SPECTRA_BASE}/${dr}dpirlrr"
+
+        if [[ ! -d "$dir" ]]; then
+            cnt="—"; status="MISSING"; col="$C_RED"
+        else
+            cnt=$(ls "$dir" 2>/dev/null | wc -l); cnt=$(echo "$cnt" | tr -d '[:space:]')
+            if   [[ "$cnt" -eq 2003 ]]; then status="DONE";    col="$C_GREEN"
+            elif [[ "$cnt" -eq 1001 ]]; then status="RAW";     col="$C_YELLOW"
+            elif [[ "$cnt" -eq 0    ]]; then status="EMPTY";   col="$C_RED"
+            else                              status="PARTIAL"; col="$C_RED"
+            fi
+        fi
+
+        row=$(printf "%-5s %-7s  %-16s %-9s  %s" "$rr" "$lmdidn" "$dr" "$cnt" "$status")
+        printf "%-5s %-7s  %-16s %-9s  " "$rr" "$lmdidn" "$dr" "$cnt"
+        echo -e "${col}${status}${C_RESET}"
+        [[ -n "$OUTPUT_FILE" ]] && echo "$row" >> "$OUTPUT_FILE"
+    done
+
+    echo ""
+    echo -e "  ${C_CYAN}·${C_RESET} DONE=2003 (converted)  RAW=1001 (pre-convert)  PARTIAL=incomplete  EMPTY=dir but 0 files  MISSING=no dir"
+    [[ -n "$OUTPUT_FILE" ]] && echo -e "\n  ${C_GREEN}✓${C_RESET} Report saved to: ${OUTPUT_FILE}"
+    exit 0
+fi
+
+# ==============================================================================
+# BATCH MODE: quick table for multiple runs (3-day; unchanged)
 # ==============================================================================
 if [[ -n "$BATCH_START" ]]; then
 
@@ -235,7 +329,12 @@ fi
 MDIDN=$(( 6256 + RUN_NUMBER * 72 ))
 RUN_PAD=$(printf "%02d" "$RUN_NUMBER")
 
-# ── Load config or auto-discover ─────────────────────────────────────────────
+# ── Additional paths for single-run mode ─────────────────────────────────────
+SPECTRA_BASE="${PROJECT_BASE}/rcf-93/data/spc/hmi"
+MAVG_BASE="${PROJECT_BASE}/rcf-57/astro0/data"
+PWIN_DIR="${PROJECT_BASE}/rcf-04/astro10/windowtest/HMIrun${RUN_NUMBER}"
+
+# ── Load config or auto-discover (3-day date ranges) ─────────────────────────
 DATE_RANGES=()
 
 if [[ -n "$CONFIG_FILE" ]]; then
@@ -248,17 +347,19 @@ elif [[ -f "config/run${RUN_NUMBER}.conf" ]]; then
     source "config/run${RUN_NUMBER}.conf"
 fi
 
-# If still empty, try to discover from Part 1 directories on disk
+# If still empty, try to discover the 3-day ranges from Part 1 directories on disk
 if [[ ${#DATE_RANGES[@]} -eq 0 ]]; then
-    SPECTRA_BASE="${PROJECT_BASE}/rcf-93/data/spc/hmi"
     for dir in "${SPECTRA_BASE}"/*dpirlrr; do
         [[ -d "$dir" ]] || continue
         dr=$(basename "$dir" | sed 's/dpirlrr$//')
         DATE_RANGES+=("$dr")
     done
 
-    # Filter: keep only the 24 dateranges belonging to this run
-    MAVG_BASE="${PROJECT_BASE}/rcf-57/astro0/data"
+    # Filter: keep only the 24 dateranges belonging to this run.
+    # NOTE: this filter requires the 3-day mavg dir (avgspc2880) or fitting dir,
+    # which naturally EXCLUDES any 72-day dir (it uses avgspc69120) sharing the
+    # same SPECTRA_BASE/*dpirlrr namespace. So 3-day discovery is robust to 72-day
+    # dirs being present.
     FILTERED=()
     for dr in "${DATE_RANGES[@]}"; do
         mavg_dir="${MAVG_BASE}/avgspc2880.wtnonavgcorrall.${dr}dpirlnewrr.hpcc"
@@ -276,22 +377,56 @@ if [[ ${#DATE_RANGES[@]} -eq 0 ]]; then
             mapfile -t DATE_RANGES < "$DR_LIST"
         elif [[ -f "${PROJECT_BASE}/rcf-57/astro0/data/run${RUN_NUMBER}.dateranges.lst" ]]; then
             mapfile -t DATE_RANGES < "${PROJECT_BASE}/rcf-57/astro0/data/run${RUN_NUMBER}.dateranges.lst"
+        else
+            DATE_RANGES=()
         fi
     fi
 fi
 
-if [[ ${#DATE_RANGES[@]} -eq 0 ]]; then
-    echo "ERROR: Cannot determine date ranges for Run ${RUN_NUMBER}."
-    echo "       Provide --config or ensure dateranges list exists."
-    exit 2
-fi
-
 NUM_DR=${#DATE_RANGES[@]}
 
-# ── Additional paths for single-run mode ─────────────────────────────────────
-SPECTRA_BASE="${PROJECT_BASE}/rcf-93/data/spc/hmi"
-MAVG_BASE="${PROJECT_BASE}/rcf-57/astro0/data"
-PWIN_DIR="${PROJECT_BASE}/rcf-04/astro10/windowtest/HMIrun${RUN_NUMBER}"
+# 3-day ranges are REQUIRED only if the mode actually evaluates the 3-day pipeline.
+if [[ "$NEED_3DAY" == "true" && $NUM_DR -eq 0 ]]; then
+    if [[ "$MODE" == "3day" ]]; then
+        echo "ERROR: Cannot determine 3-day date ranges for Run ${RUN_NUMBER}."
+        echo "       Provide --config or ensure dateranges list exists."
+        exit 2
+    else
+        # mode=both: 3-day ranges absent (e.g. spectra being rebuilt) — skip 3-day,
+        # still allow the 72-day spectra checks to run.
+        warn "No 3-day date ranges found for Run ${RUN_NUMBER}; skipping 3-day checks (mode=both)."
+        NEED_3DAY=false
+    fi
+fi
+
+# ── Resolve the single 72-day daterange (only when needed) ───────────────────
+# Priority: --dr72  >  DATE_RANGE_72 (config)  >  computed from MDIDN.
+# The computation is deterministic and verified (see dr72_for_mdidn anchor), so
+# it works even when the 3-day spectra are absent (e.g. mid-rebuild). No noisy
+# filesystem candidate scan; if a run used a nonstandard dir name, pass --dr72.
+DR72_RESOLVED=""
+DR72_METHOD=""
+resolve_dr72() {
+    if [[ -n "$DR72" ]]; then
+        DR72_RESOLVED="$DR72"; DR72_METHOD="--dr72"; return 0
+    fi
+    if [[ -n "${DATE_RANGE_72:-}" ]]; then
+        DR72_RESOLVED="$DATE_RANGE_72"; DR72_METHOD="config"; return 0
+    fi
+    local computed; computed=$(dr72_for_mdidn "$MDIDN") || return 1
+    [[ -z "$computed" ]] && return 1
+    DR72_RESOLVED="$computed"; DR72_METHOD="computed from MDIDN"
+    return 0
+}
+
+if [[ "$NEED_72DAY" == "true" ]]; then
+    if ! resolve_dr72; then
+        if [[ "$MODE" == "72day" ]]; then exit 2; fi
+        # mode=both: don't abort the whole run; just disable 72-day checks
+        warn "72-day daterange unresolved; skipping 72-day checks (mode=both)."
+        NEED_72DAY=false
+    fi
+fi
 
 # ── Should we check this part? ───────────────────────────────────────────────
 should_check() {
@@ -307,18 +442,17 @@ should_check() {
 
 # ── Counters ─────────────────────────────────────────────────────────────────
 TOTAL_PASS=0; TOTAL_FAIL=0; TOTAL_WARN=0
-PART_STATUS=()
+PART_STATUS=()        # 3-day part status
+PART_STATUS_72=()     # 72-day part status
 
-record_part() {
-    local part=$1 status=$2
-    PART_STATUS[$part]="$status"
-}
+record_part()    { PART_STATUS[$1]="$2"; }
+record_part_72() { PART_STATUS_72[$1]="$2"; }
 
 # ==============================================================================
-# PART 1: Raw Spectra (Data Transfer from JSOC)
+# PART 1 (3-day): Raw Spectra (Data Transfer from JSOC)
 # ==============================================================================
 check_part1() {
-    header "Part 1: Raw Spectra (JSOC transfer)"
+    header "Part 1 [3day]: Raw Spectra (JSOC transfer)"
 
     local ok=0 bad=0
     for dr in "${DATE_RANGES[@]}"; do
@@ -342,21 +476,65 @@ check_part1() {
     done
 
     if [[ $bad -eq 0 ]]; then
-        pass "Part 1: ${ok}/${NUM_DR} dateranges complete (2003 files each)"
+        pass "Part 1 [3day]: ${ok}/${NUM_DR} dateranges complete (2003 files each)"
         TOTAL_PASS=$((TOTAL_PASS + 1))
         record_part 1 "PASS"
     else
-        fail "Part 1: ${ok}/${NUM_DR} OK, ${bad} incomplete"
+        fail "Part 1 [3day]: ${ok}/${NUM_DR} OK, ${bad} incomplete"
         TOTAL_FAIL=$((TOTAL_FAIL + 1))
         record_part 1 "FAIL"
     fi
 }
 
 # ==============================================================================
-# PART 2: M-Averaging and Renormalization
+# PART 1 (72-day): Raw Spectra — single daterange
+# ------------------------------------------------------------------------------
+# Same base dir + dpirlrr suffix as 3-day (verified from the pipeline docs:
+# 72-day scp target is rcf-93/data/spc/hmi/{daterange}dpirlrr). Expected count:
+#   1001  = raw transferred (pre convert-fits-move)
+#   2003  = after convert-fits-move
+# Both are reported and accepted; the label states which state was found.
+# *** CONFIRM the 1001/2003 thresholds against the live filesystem for one run. ***
+# ==============================================================================
+check_part1_72() {
+    header "Part 1 [72day]: Raw Spectra — ${DR72_RESOLVED}"
+
+    local dir="${SPECTRA_BASE}/${DR72_RESOLVED}dpirlrr"
+    if [[ ! -d "$dir" ]]; then
+        fail "72day raw spectra directory missing: ${dir}"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        record_part_72 1 "FAIL"
+        return
+    fi
+
+    local count
+    count=$(ls "$dir" 2>/dev/null | wc -l)
+    count=$(echo "$count" | tr -d '[:space:]')
+
+    if [[ "$count" -eq 2003 ]]; then
+        pass "Part 1 [72day]: ${count} files (converted, complete)"
+        TOTAL_PASS=$((TOTAL_PASS + 1))
+        record_part_72 1 "PASS"
+    elif [[ "$count" -eq 1001 ]]; then
+        pass "Part 1 [72day]: ${count} files (raw transferred; convert-fits-move pending)"
+        TOTAL_PASS=$((TOTAL_PASS + 1))
+        record_part_72 1 "PASS"
+    elif [[ "$count" -eq 0 ]]; then
+        fail "Part 1 [72day]: directory exists but is EMPTY (0 files — not downloaded)"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        record_part_72 1 "FAIL"
+    else
+        fail "Part 1 [72day]: ${count} files (PARTIAL; expected 1001 raw or 2003 converted)"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        record_part_72 1 "FAIL"
+    fi
+}
+
+# ==============================================================================
+# PART 2 (3-day): M-Averaging and Renormalization
 # ==============================================================================
 check_part2() {
-    header "Part 2: M-Averaging + Renormalization"
+    header "Part 2 [3day]: M-Averaging + Renormalization"
 
     # --- 2a: pwin files (26 pwin + 25 wf = 51 is normal) ---
     local pwin_count=0
@@ -399,18 +577,54 @@ check_part2() {
     done
 
     if [[ $bad -eq 0 && "$pwin_count" -ge 26 ]]; then
-        pass "Part 2: ${ok}/${NUM_DR} dateranges complete"
+        pass "Part 2 [3day]: ${ok}/${NUM_DR} dateranges complete"
         TOTAL_PASS=$((TOTAL_PASS + 1))
         record_part 2 "PASS"
     else
-        fail "Part 2: ${ok}/${NUM_DR} mavg/psdr OK, pwin=${pwin_count}"
+        fail "Part 2 [3day]: ${ok}/${NUM_DR} mavg/psdr OK, pwin=${pwin_count}"
         TOTAL_FAIL=$((TOTAL_FAIL + 1))
         record_part 2 "FAIL"
     fi
 }
 
 # ==============================================================================
-# PART 3: Fitting
+# PART 2 (72-day): M-Averaging and Renormalization
+# ------------------------------------------------------------------------------
+# Directory base is avgspc69120 (vs 3-day avgspc2880); 69120 = 2880 × 24.
+# File counts are the SAME as 3-day per the docs: 1001 Y*aspc2nonavdisc (mavg)
+# and 1001 Y*cspc2nonavdisc (psdr).  Pwin is shared (HMIrun##), already covered
+# by the 3-day check; not re-checked here.
+# ==============================================================================
+check_part2_72() {
+    header "Part 2 [72day]: M-Averaging + Renormalization — ${DR72_RESOLVED}"
+
+    local mavg_dir="${MAVG_BASE}/avgspc69120.wtnonavgcorrall.${DR72_RESOLVED}dpirlnewrr.hpcc"
+    if [[ ! -d "$mavg_dir" ]]; then
+        fail "72day mavg directory missing: avgspc69120...${DR72_RESOLVED}dpirlnewrr.hpcc"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        record_part_72 2 "FAIL"
+        return
+    fi
+
+    local mavg_n psdr_n
+    mavg_n=$(find "$mavg_dir" -maxdepth 1 -name 'Y*aspc2nonavdisc' 2>/dev/null | wc -l)
+    psdr_n=$(find "$mavg_dir" -maxdepth 1 -name 'Y*cspc2nonavdisc' 2>/dev/null | wc -l)
+    mavg_n=$(echo "$mavg_n" | tr -d '[:space:]')
+    psdr_n=$(echo "$psdr_n" | tr -d '[:space:]')
+
+    if [[ "$mavg_n" -eq 1001 && "$psdr_n" -eq 1001 ]]; then
+        pass "Part 2 [72day]: mavg=${mavg_n} psdr=${psdr_n} (complete)"
+        TOTAL_PASS=$((TOTAL_PASS + 1))
+        record_part_72 2 "PASS"
+    else
+        fail "Part 2 [72day]: mavg=${mavg_n}/1001 psdr=${psdr_n}/1001"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        record_part_72 2 "FAIL"
+    fi
+}
+
+# ==============================================================================
+# PART 3: Fitting (3-day only)
 # ==============================================================================
 check_part3() {
     header "Part 3: Fitting"
@@ -476,7 +690,7 @@ check_part3() {
 }
 
 # ==============================================================================
-# PART 4: Conversion, Subtraction, and Binning
+# PART 4: Conversion, Subtraction, and Binning (3-day only)
 # ==============================================================================
 check_part4() {
     header "Part 4: Conversion, Subtraction & Binning"
@@ -521,7 +735,7 @@ check_part4() {
 }
 
 # ==============================================================================
-# PART 5: Solar Activity Indices (prepared by Dr. Rhodes / merge script)
+# PART 5: Solar Activity Indices (3-day only)
 # ==============================================================================
 check_part5() {
     header "Part 5: Solar Activity Indices"
@@ -577,7 +791,7 @@ check_part5() {
 }
 
 # ==============================================================================
-# PART 6: Regression and Transposition
+# PART 6: Regression and Transposition (3-day only)
 # ==============================================================================
 check_part6() {
     header "Part 6: Regression & Transposition (Zero Crossings)"
@@ -623,46 +837,79 @@ check_part6() {
 # Main (single-run mode)
 # ==============================================================================
 echo ""
-echo -e "${C_BOLD}Pipeline Validation — Run ${RUN_NUMBER}${C_RESET}"
+echo -e "${C_BOLD}Pipeline Validation — Run ${RUN_NUMBER} (mode=${MODE})${C_RESET}"
 echo -e "  MDIDN:        ${MDIDN}"
-echo -e "  Date ranges:  ${NUM_DR}"
 echo -e "  PROJECT_BASE: ${PROJECT_BASE}"
-echo -e "  First DR:     ${DATE_RANGES[0]}"
-echo -e "  Last DR:      ${DATE_RANGES[${#DATE_RANGES[@]}-1]}"
+if [[ "$NEED_3DAY" == "true" ]]; then
+    echo -e "  3day ranges:  ${NUM_DR}"
+    [[ $NUM_DR -gt 0 ]] && echo -e "  First / Last: ${DATE_RANGES[0]} / ${DATE_RANGES[${#DATE_RANGES[@]}-1]}"
+fi
+[[ "$NEED_72DAY" == "true" ]] && echo -e "  72day range:  ${DR72_RESOLVED}  (${DR72_METHOD})"
 
-# Run each part check
-for _p in 1 2 3 4 5 6; do
-    if should_check "$_p"; then
-        "check_part${_p}"
-    else
-        record_part "$_p" "SKIP"
+# Run 3-day part checks
+if [[ "$NEED_3DAY" == "true" ]]; then
+    for _p in 1 2 3 4 5 6; do
+        if should_check "$_p"; then
+            "check_part${_p}"
+        else
+            record_part "$_p" "SKIP"
+        fi
+    done
+fi
+
+# Run 72-day spectra checks (Parts 1 & 2 only; 3-6 are 3-day-specific)
+if [[ "$NEED_72DAY" == "true" ]]; then
+    for _p in 1 2; do
+        if should_check "$_p"; then
+            "check_part${_p}_72"
+        else
+            record_part_72 "$_p" "SKIP"
+        fi
+    done
+    # If the user explicitly asked for a 3-6 part under mode=72day, say it's N/A.
+    if [[ ${#PARTS_TO_CHECK[@]} -gt 0 ]]; then
+        for p in "${PARTS_TO_CHECK[@]}"; do
+            case "$p" in 3|4|5|6) warn "Part ${p} is not defined for 72-day spectra in this tool (3-day pipeline only).";; esac
+        done
     fi
-done
+fi
 
 # ==============================================================================
 # Summary
 # ==============================================================================
-header "Summary — Run ${RUN_NUMBER}"
+header "Summary — Run ${RUN_NUMBER} (mode=${MODE})"
 
-for part in 1 2 3 4 5 6; do
-    status="${PART_STATUS[$part]:-SKIP}"
-    label=""
-    case $part in
-        1) label="Raw Spectra" ;;
-        2) label="M-Avg + Renorm" ;;
-        3) label="Fitting" ;;
-        4) label="Conv/Sub/Bin" ;;
-        5) label="Activity Indices" ;;
-        6) label="Regression/ZeroCross" ;;
+label_for() {
+    case $1 in
+        1) echo "Raw Spectra" ;;
+        2) echo "M-Avg + Renorm" ;;
+        3) echo "Fitting" ;;
+        4) echo "Conv/Sub/Bin" ;;
+        5) echo "Activity Indices" ;;
+        6) echo "Regression/ZeroCross" ;;
     esac
-
+}
+print_status_line() {
+    local part=$1 status=$2 tag=$3
+    local label; label=$(label_for "$part")
     case "$status" in
-        PASS) echo -e "  Part ${part} (${label}):  ${C_GREEN}PASS${C_RESET}" ;;
-        FAIL) echo -e "  Part ${part} (${label}):  ${C_RED}FAIL${C_RESET}" ;;
-        WARN) echo -e "  Part ${part} (${label}):  ${C_YELLOW}WARN${C_RESET}" ;;
-        SKIP) echo -e "  Part ${part} (${label}):  ${C_CYAN}SKIP${C_RESET}" ;;
+        PASS) echo -e "  Part ${part} ${tag} (${label}):  ${C_GREEN}PASS${C_RESET}" ;;
+        FAIL) echo -e "  Part ${part} ${tag} (${label}):  ${C_RED}FAIL${C_RESET}" ;;
+        WARN) echo -e "  Part ${part} ${tag} (${label}):  ${C_YELLOW}WARN${C_RESET}" ;;
+        SKIP) echo -e "  Part ${part} ${tag} (${label}):  ${C_CYAN}SKIP${C_RESET}" ;;
     esac
-done
+}
+
+if [[ "$NEED_3DAY" == "true" ]]; then
+    for part in 1 2 3 4 5 6; do
+        print_status_line "$part" "${PART_STATUS[$part]:-SKIP}" "[3day]"
+    done
+fi
+if [[ "$NEED_72DAY" == "true" ]]; then
+    for part in 1 2; do
+        print_status_line "$part" "${PART_STATUS_72[$part]:-SKIP}" "[72day]"
+    done
+fi
 
 echo ""
 if [[ $TOTAL_FAIL -gt 0 ]]; then
