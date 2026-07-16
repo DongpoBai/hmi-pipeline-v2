@@ -347,6 +347,24 @@ elif [[ -f "config/run${RUN_NUMBER}.conf" ]]; then
     source "config/run${RUN_NUMBER}.conf"
 fi
 
+# If still empty, compute the 24 3-day ranges deterministically from MDIDN.
+# Range i of run RR starts at MDIDN + 3*i (i = 0..23); NtoD_vl turns an MDIDN
+# plus a span into a daterange. This does not depend on any downstream directory
+# existing, so it also works for runs whose Part 2 has not been run yet.
+if [[ ${#DATE_RANGES[@]} -eq 0 ]]; then
+    NTOD_VL="${PROJECT_BASE}/rcf-04/astro10/wmltp/theor1.0/scripts/NtoD_vl"
+    if [[ -x "$NTOD_VL" ]]; then
+        _computed=()
+        for ((_i=0; _i<24; _i++)); do
+            _dr=$("$NTOD_VL" $(( MDIDN + 3 * _i )) 3 2>/dev/null | tr -d '[:space:]')
+            [[ -n "$_dr" ]] && _computed+=("$_dr")
+        done
+        if [[ ${#_computed[@]} -eq 24 ]]; then
+            DATE_RANGES=("${_computed[@]}")
+        fi
+    fi
+fi
+
 # If still empty, try to discover the 3-day ranges from Part 1 directories on disk
 if [[ ${#DATE_RANGES[@]} -eq 0 ]]; then
     for dir in "${SPECTRA_BASE}"/*dpirlrr; do
