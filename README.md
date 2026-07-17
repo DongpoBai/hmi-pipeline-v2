@@ -28,8 +28,6 @@ pipeline-v2/
 ├── run_3day_regtrans.sh    # Part 6: Regression & Transposition
 ├── fix_legacy_slurm.sh     # Post-prep fix for legacy SLURM files
 ├── pwinauto.py             # Python replacement for IDL pwin script
-├── setup_testenv.sh        # Create isolated test environment
-├── diff_testenv.sh         # Compare test vs production outputs
 ├── run_lookup.sh           # Run number ↔ MDIDN ↔ date range lookup
 ├── logs/                   # Runtime logs (gitignored)
 └── checkpoints/            # Resume checkpoints (gitignored)
