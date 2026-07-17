@@ -18,13 +18,6 @@ SETL=24
 # Instrument (lowercase)
 INSTRUMENT=hmi
 
-# ── Paths ───────────────────────────────────────────────────────────────────
-# These defaults should work for most cases. Override only if needed.
-PROJECT_BASE=/project2/erhodes_44
-SCRATCH_BASE=/scratch1/dongpoba
-
-# Container image
-CONTAINER_IMAGE=/project2/erhodes_44/rcf-04/astro10/singularity/images/spscratch/restore_centos7.2405291154.sif_03_06_2025
 
 # ── Date ranges ─────────────────────────────────────────────────────────────
 # After running genDRlist, paste all 24 date ranges here.

@@ -56,9 +56,6 @@ get_sing_binds() {
     for _m in "${SCRATCH_CANDIDATES[@]}"; do
         [[ -d "$_m" ]] && binds+=" --bind ${_m}:${_m}"
     done
-    if [[ "$PROJECT_BASE" != "/project2/erhodes_44" ]]; then
-        binds+=" --bind /project2/erhodes_44:/project2/erhodes_44"
-    fi
     echo "$binds"
 }
 
