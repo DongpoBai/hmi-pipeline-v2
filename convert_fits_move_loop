@@ -1,0 +1,29 @@
+#!/bin/bash
+
+base_dir="/home/rcf-93/data/spc"
+dpr="dpirlrr"
+NTOD="/project2/erhodes_44/rcf-04/astro10/wmltp/theor1.0/scripts/fitsfiles72day/NtoD"
+CONTAINER="/project2/erhodes_44/rcf-04/astro10/singularity/images/spscratch/restore_centos7.2405291154.sif_03_06_2025"
+
+file="dates.txt"
+
+if [ ! -f "$file" ]; then
+    echo "The file dates.txt does not exist."
+    exit 1
+fi
+
+while IFS= read -r line
+do
+   echo "line is $line"
+   mdidn=$line
+   dr=$($NTOD ${line})
+   inst=hmi
+
+   singdir="${base_dir}/${inst}/${dr}${dpr}"
+
+   singularity exec \
+     --bind /project2/erhodes_44:/home \
+     --bind /scratch1:/scratch1 \
+     $CONTAINER \
+     /home/rcf-93/data/spc/hmi/convert_fits_move-scratch.sh $dr $mdidn $singdir
+done < "$file"

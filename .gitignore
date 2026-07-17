@@ -15,3 +15,23 @@ testenv/
 # OS
 .DS_Store
 Thumbs.db
+# ── Added 2026-07-16 ──
+# Patch backups (rollback only; git is the real history)
+*.bak_*
+
+# Compiled objects and binaries
+*.o
+hmirun*activity7differences
+
+# Fortran sources belonging to the Rhodes group pipeline, not to this repo.
+# They live in production under rcf-04; this repo only orchestrates.
+*.f
+
+# Data products (belong in project storage, not in version control)
+*.dat
+
+# One-off status dumps
+pipeline_status_*.txt
+
+# One-off migration scripts (the commit diff is the record)
+patch_step*.py

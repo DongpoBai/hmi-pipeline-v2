@@ -29,20 +29,33 @@ CHECKPOINT_FILE="${CHECKPOINT_FILE:-}"
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-/project2/erhodes_44/rcf-04/astro10/singularity/images/spscratch/restore_centos7.2405291154.sif_03_06_2025}"
 PROJECT_BASE="${PROJECT_BASE:-/project2/erhodes_44}"
 
-# Singularity bind mounts (matching the 'sing' alias)
-SING_BINDS=(
-    "--bind ${PROJECT_BASE}:/home"
-    "--bind ${PROJECT_BASE}/rcf-57:/rcf-57"
-    "--bind ${PROJECT_BASE}/rcf-04:/rcf-04"
-    "--bind ${PROJECT_BASE}/rcf-93:/rcf-93"
-    "--bind /scratch1:/scratch1"
-)
+# ── Scratch file system ──────────────────────────────────────────────────────
+# SCRATCH_MOUNT : which scratch file system this pipeline WRITES to.
+#                 Change this default when /scratch1 is retired.
+# SCRATCH_BASE  : this operator's directory on it. Derived from $USER so that
+#                 no username is ever hardcoded. Override via environment.
+# $USER is not guaranteed to be set under `set -u` (e.g. inside SLURM jobs),
+# so fall back to id -un.
+PIPELINE_USER="${PIPELINE_USER:-${USER:-$(id -un)}}"
+SCRATCH_MOUNT="${SCRATCH_MOUNT:-/scratch1}"
+SCRATCH_BASE="${SCRATCH_BASE:-${SCRATCH_MOUNT}/${PIPELINE_USER}}"
+
+# Which scratch file systems must be VISIBLE inside the container. This is an
+# access question, distinct from SCRATCH_MOUNT above: during the
+# /scratch1 -> /scratch2 transition both exist, legacy scripts still reference
+# /scratch1, and new data may live on /scratch2. Bind whichever are present so
+# that both resolve; the list self-narrows once a file system is retired.
+SCRATCH_CANDIDATES=(/scratch1 /scratch2)
+
 get_sing_binds() {
     local binds="--bind ${PROJECT_BASE}:/home"
     binds+=" --bind ${PROJECT_BASE}/rcf-57:/rcf-57"
     binds+=" --bind ${PROJECT_BASE}/rcf-04:/rcf-04"
     binds+=" --bind ${PROJECT_BASE}/rcf-93:/rcf-93"
-    binds+=" --bind /scratch1:/scratch1"
+    local _m
+    for _m in "${SCRATCH_CANDIDATES[@]}"; do
+        [[ -d "$_m" ]] && binds+=" --bind ${_m}:${_m}"
+    done
     if [[ "$PROJECT_BASE" != "/project2/erhodes_44" ]]; then
         binds+=" --bind /project2/erhodes_44:/project2/erhodes_44"
     fi
@@ -217,15 +230,9 @@ sing_exec() {
     fi
 
     cmd="export PREPATH=/home && ${cmd}"
-    local binds="--bind ${PROJECT_BASE}:/home"
-    binds+=" --bind ${PROJECT_BASE}/rcf-57:/rcf-57"
-    binds+=" --bind ${PROJECT_BASE}/rcf-04:/rcf-04"
-    binds+=" --bind ${PROJECT_BASE}/rcf-93:/rcf-93"
-    binds+=" --bind /scratch1:/scratch1"
-    # In testenv mode, also mount production path so symlinks inside testenv resolve
-    if [[ "$PROJECT_BASE" != "/project2/erhodes_44" ]]; then
-        binds+=" --bind /project2/erhodes_44:/project2/erhodes_44"
-    fi
+    # Single source of truth for bind mounts (incl. the testenv production mount)
+    local binds
+    binds=$(get_sing_binds)
 
     local full_cmd="singularity exec ${binds} ${CONTAINER_IMAGE} /bin/bash -c '${cmd}'"
 
