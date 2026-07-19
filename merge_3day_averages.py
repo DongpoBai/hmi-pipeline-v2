@@ -13,12 +13,17 @@ Output: 3dayaveactivityvalueshmirunXX.MMDDYY.dat (per-run)
 """
 import sys
 import os
+import glob
+import re
 import argparse
 from datetime import datetime
 
 BASEDIR = "/project2/erhodes_44/rcf-04/astro10/data/mdi/lnu/comparison"
 
-# Run → (date_range, date_stamp) mapping for the 6 individual files
+# Optional explicit override of (date_range, date_stamp) per run. Runs NOT listed
+# here are auto-discovered from the daily-indices file + the on-disk 3day files
+# (see discover_run_files). Kept for reproducibility of historical runs; new runs
+# need no entry here.
 RUN_FILES = {
     76: ("021025to042225", "031826"),
     77: ("042325to070325", "031926"),
@@ -37,6 +42,59 @@ INDEX_FILES = [
     "3daySEMF1averages",         # → col 12: SEM1
     "3dayMgIIv2.0averages",      # → col 17: MgII
 ]
+
+
+def date_range_from_daily(run_num, basedir=BASEDIR):
+    """Derive the 72-day date_range 'MMDDYYtoMMDDYY' from the daily-indices file
+    produced by solar-activity-pipeline (dailyactivityvalueshmirunNN.dat), using
+    its first and last data rows (columns 3-5 = year, month, day)."""
+    f = os.path.join(basedir, f"dailyactivityvalueshmirun{run_num}.dat")
+    if not os.path.exists(f):
+        raise FileNotFoundError(f"daily-indices file not found: {f}")
+    with open(f) as fh:
+        lines = [ln for ln in fh if ln.strip()]
+    if not lines:
+        raise ValueError(f"daily-indices file is empty: {f}")
+
+    def mmddyy(line):
+        p = line.split()
+        yyyy, mm, dd = p[2], p[3], p[4]
+        return f"{int(mm):02d}{int(dd):02d}{yyyy[2:]}"
+
+    return f"{mmddyy(lines[0])}to{mmddyy(lines[-1])}"
+
+
+def discover_run_files(run_num, basedir=BASEDIR):
+    """Return (date_range, date_stamp) for a run by discovery, no hardcoding.
+    date_range comes from the daily-indices file; date_stamp is read from the
+    on-disk 3day*averages filenames for that date_range (newest if several).
+    Verifies all 6 index files are present for the chosen (date_range, date_stamp)."""
+    date_range = date_range_from_daily(run_num, basedir)
+
+    pattern = os.path.join(basedir, f"{INDEX_FILES[0]}.{date_range}.*.dat")
+    hits = sorted(glob.glob(pattern))
+    if not hits:
+        raise FileNotFoundError(
+            f"no {INDEX_FILES[0]} file for date_range {date_range} in {basedir}; "
+            f"the 6 manual 3day*averages inputs may not be generated yet")
+
+    stamps = set()
+    for h in hits:
+        m = re.search(rf"{re.escape(date_range)}\.(\d+)\.dat$", os.path.basename(h))
+        if m:
+            stamps.add(m.group(1))
+    if not stamps:
+        raise ValueError(f"could not parse date_stamp from: {hits}")
+    date_stamp = sorted(stamps)[-1]  # newest stamp if multiple
+
+    missing = [p for p in INDEX_FILES
+               if not os.path.exists(os.path.join(basedir, f"{p}.{date_range}.{date_stamp}.dat"))]
+    if missing:
+        raise FileNotFoundError(
+            f"date_range {date_range} stamp {date_stamp}: missing {len(missing)} "
+            f"of 6 index files: {missing}")
+
+    return date_range, date_stamp
 
 
 def read_index_file(filepath):
@@ -65,13 +123,13 @@ def fortran_e12_5(val):
 
 def mdidn_to_yearfract(mdidn):
     """Convert MDIDN to fractional year. Matches Rhodes' convention."""
-    return mdidn / 365.25 + 1980.0
+    return mdidn / 365.25 + 2000.0
 
 
 def format_row(seq, mdidn, ndays, yearfract, ri2, ra, radioflux,
                sem0, sem1, mgii):
     """Format one row matching the 17-column format of existing files.
-    
+
     Fortran format:
     I4,x,I5,1x,I1,1x,f8.3,1x,f9.4,1x,f9.4,1x,f8.4,1x,
     f8.4,1x,f9.6,1x,f9.6,1x,e12.5,1x,e12.5,1x,f10.5,1x,f10.5,
@@ -98,11 +156,15 @@ def format_row(seq, mdidn, ndays, yearfract, ri2, ra, radioflux,
 
 def merge_run(run_num, start_seq):
     """Merge 6 index files for one run into 17-column format."""
-    if run_num not in RUN_FILES:
-        print(f"ERROR: No file mapping for Run {run_num}")
-        return None
-
-    date_range, date_stamp = RUN_FILES[run_num]
+    if run_num in RUN_FILES:
+        date_range, date_stamp = RUN_FILES[run_num]        # explicit override
+    else:
+        try:
+            date_range, date_stamp = discover_run_files(run_num)   # auto-discover
+            print(f"  Auto-discovered: date_range={date_range}, date_stamp={date_stamp}")
+        except (FileNotFoundError, ValueError) as e:
+            print(f"ERROR: {e}")
+            return None
 
     # Read all 6 index files
     all_data = {}
