@@ -60,8 +60,12 @@ get_sing_binds() {
 }
 
 
-# ifort library path needed by some Fortran programs
-IFORT_LIB="/spack/apps/linux-centos7-x86_64/intel-19.0.4/gsl-2.5-cdyxrnsbjihxsez7me6fekh7f6mxjgni/lib"
+# GSL library path for the Fortran programs that link it (some Part 4/6 steps).
+# This points at the container's OWN GSL under /usr/lib64. The previous value was
+# a host spack path that does not exist inside the container, so every --ifort
+# call exported a dead path. /usr/lib64 is where the container actually ships
+# libgsl.so, and is the same GSL build_cycle2423.sh links against.
+IFORT_LIB="/usr/lib64"
 
 # SLURM wait defaults
 SLURM_POLL_INTERVAL="${SLURM_POLL_INTERVAL:-30}"   # seconds between polls
@@ -650,7 +654,7 @@ run_container_test() {
     if [[ "$test_output" == *"IFORT_OK"* ]]; then
         log_info "  [4/4] ifort/GSL library path: OK"
     else
-        log_warn "  [4/4] ifort/GSL library not found at ${IFORT_LIB} (may be OK for mavg)"
+        log_warn "  [4/4] GSL library not found at ${IFORT_LIB} (Part 2 does not need it; Parts 4/6 do)"
     fi
 
     log_info ""
