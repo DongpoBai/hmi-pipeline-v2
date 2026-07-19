@@ -154,6 +154,7 @@ STEP_ORDER=(
     gendrlist
     scratch_mkdir
     prepmavgrenorm
+    fix_slurm
     pwin_manual
     updatewindow
     loop_start
@@ -250,6 +251,28 @@ if ! should_skip "prepmavgrenorm"; then
         "cd ${CONT_DATA_DIR} && ./prepmavgrenorm.wtcorrall.newrr.disc.sh ${MDIDN} ${INSTRUMENT} 3 ${SETL}"
 
     save_checkpoint "prepmavgrenorm"
+fi
+
+# ==============================================================================
+# STEP 3.5: Patch generated SLURM files (add container bind mounts)
+#
+# prepmavgrenorm generates the per-daterange sbatch*.slurm files without bind
+# mounts on the current Discovery. fix_legacy_slurm adds them. It is idempotent
+# (skips files that already have binds), so it is safe to run every time. This
+# must happen before the Step 6 loop submits those SLURM files.
+# fix_legacy_slurm is a container-OUTSIDE script, so run_cmd (not sing_exec).
+# ==============================================================================
+banner "Step 3.5: Patch generated SLURM files (bind mounts)"
+
+if ! should_skip "fix_slurm"; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        run_cmd "fix_legacy_slurm (mavg) for Run ${RUN_NUMBER}" \
+            "${SCRIPT_DIR}/fix_legacy_slurm.sh" --run "${RUN_NUMBER}" --part mavg --dry-run
+    else
+        run_cmd "fix_legacy_slurm (mavg) for Run ${RUN_NUMBER}" \
+            "${SCRIPT_DIR}/fix_legacy_slurm.sh" --run "${RUN_NUMBER}" --part mavg
+    fi
+    save_checkpoint "fix_slurm"
 fi
 
 # ==============================================================================
