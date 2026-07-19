@@ -182,7 +182,7 @@ if ! should_skip "runtrans"; then
     sing_exec "runtranszero for Run ${RUN_NUMBER}" \
         "cd ${CONT_SCRIPTS_DIR} && ./runtranszerohmiwtrev6rr-dp2.sing.sh ${RUN_NUMBER}" || {
         log_error "runtranszero failed. Try from discovery2:"
-        log_error "  ssh dongpoba@discovery2.usc.edu"
+        log_error "  ssh ${PIPELINE_USER}@discovery2.usc.edu"
         log_error "  cd ${PIPELINE_DIR}"
         log_error "  ./run_3day_regtrans.sh --run ${RUN_NUMBER} --resume"
         exit 1
