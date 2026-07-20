@@ -72,10 +72,38 @@ EXE_DIR="${ACTIV_EXE_DIR:-$SCRIPT_DIR}"
 EXE="hmirun${RUN_NUMBER}activity7differences"
 EXE_PATH="${EXE_DIR}/${EXE}"
 
+# Per-run exe is built mechanically from the run-74 template (sed the run
+# number, compile with ifort -- no libraries, no per-run logic). Build it here
+# if missing so the operator does not have to do it by hand.
+TEMPLATE_F="${EXE_DIR}/hmirun74activity7differences.f"
+SRC_F="${EXE_DIR}/${EXE}.f"
 if [[ ! -x "$EXE_PATH" ]]; then
-    echo "ERROR: exe not found or not executable: ${EXE_PATH}" >&2
-    echo "       (the per-run Fortran must be compiled first: ${EXE}.f -> ${EXE})" >&2
-    exit 1
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[DRY-RUN] exe not built yet: ${EXE}"
+        echo "          would generate ${SRC_F} from hmirun74activity7differences.f"
+        echo "          (sed 's/run74/run${RUN_NUMBER}/g') and compile:"
+        echo "           ifort -diag-disable=10448 -o ${EXE} ${EXE}.f"
+    else
+        if ! command -v ifort >/dev/null 2>&1; then
+            echo "ERROR: ifort not on PATH; cannot build ${EXE}." >&2
+            echo "       Load the Intel compiler (or set it on PATH) and retry," >&2
+            echo "       or build ${EXE} by hand from the run-74 template." >&2
+            exit 1
+        fi
+        if [[ ! -f "$TEMPLATE_F" ]]; then
+            echo "ERROR: template not found: ${TEMPLATE_F}" >&2
+            echo "       Cannot generate ${SRC_F} without it." >&2
+            exit 1
+        fi
+        echo "Building ${EXE} from the run-74 template..."
+        sed "s/run74/run${RUN_NUMBER}/g" "$TEMPLATE_F" > "$SRC_F"
+        ( cd "$EXE_DIR" && ifort -diag-disable=10448 -o "$EXE" "${EXE}.f" )
+        if [[ ! -x "$EXE_PATH" ]]; then
+            echo "ERROR: compilation did not produce an executable: ${EXE_PATH}" >&2
+            exit 1
+        fi
+        echo "  built ${EXE_PATH}"
+    fi
 fi
 
 # ── Locate the C-stage input (merge output), unless overridden ───────────────
@@ -87,6 +115,21 @@ else
 fi
 
 if [[ -z "${IN_FILE:-}" || ! -f "$IN_FILE" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        # Honest dry-run: no input exists yet (this run has not been merged).
+        # Declare what would happen against the file the merge step will produce,
+        # rather than erroring out. NSETS is not known until that file exists.
+        EXPECTED="3dayaveactivityvalueshmirun${RUN_NUMBER}.<datestamp>.dat"
+        echo "Run ${RUN_NUMBER} activity differences:"
+        echo "  exe   : ${EXE_PATH}"
+        echo "  input : ${EXE_DIR}/${EXPECTED}  (not present yet; produced by the merge step)"
+        echo "  output: ${EXE_DIR}/average7activdiffshmirun${RUN_NUMBER}.dat"
+        echo "[DRY-RUN] no C-stage input on disk yet. On a real run the merge step"
+        echo "          writes it first; this step would then validate it (17 cols,"
+        echo "          contiguous seq, mdidn step 3, yearfract in range) and run:"
+        echo "           printf '%s\\n%s\\n' '${EXPECTED}' '<NSETS>' | ./${EXE}"
+        exit 0
+    fi
     echo "ERROR: no C-stage input found for run ${RUN_NUMBER}." >&2
     echo "       Looked for ${EXE_DIR}/3dayaveactivityvalueshmirun${RUN_NUMBER}.*.dat" >&2
     echo "       Run the merge step (merge_3day_averages.py) first, or set ACTIV_FILE." >&2
