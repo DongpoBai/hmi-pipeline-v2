@@ -34,5 +34,5 @@ hmirun*activity7differences
 pipeline_status_*.txt
 
 # One-off migration scripts (the commit diff is the record)
-patch_step*.py
+patch_*.py
 __pycache__/
