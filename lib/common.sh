@@ -684,6 +684,13 @@ container_to_host() {
 # Confirm before proceeding (for destructive operations)
 confirm() {
     local msg="$1"
+    # non-interactive stdin: don't block on read (which errors on /dev/null).
+    # Auto-approve only when explicitly signaled (e.g. by bd run, whose caller
+    # already chose to run); otherwise decline safely rather than crash.
+    if [[ ! -t 0 ]]; then
+        [[ "${BOARD_NONINTERACTIVE:-}" == "1" ]] && return 0
+        return 1
+    fi
     read -r -p "${msg} [y/N] " response
     [[ "$response" =~ ^[Yy]$ ]]
 }
