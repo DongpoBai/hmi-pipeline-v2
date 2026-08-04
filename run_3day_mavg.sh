@@ -230,6 +230,68 @@ if [[ $NUM_DR -ne $SETL && "$DRY_RUN" != "true" ]]; then
 fi
 
 # ==============================================================================
+# PREFLIGHT: refuse to overwrite a Run that already has complete Part 2 outputs
+# ==============================================================================
+# Step 2 (scratch_mkdir) and Step 3 (prepmavgrenorm) rebuild the per-daterange
+# directories under HOST_DATA_DIR. They clear the Y*aspc2nonavdisc and
+# Y*cspc2nonavdisc products that an earlier pass produced, then repopulate the
+# directory with fresh prep scripts. Running them again on a Run whose Part 2 is
+# already finished therefore destroys completed output before anything is
+# resubmitted. This guard stops the script before Step 2 whenever any date range
+# in scope is already complete.
+#
+# Scope is the DATE_RANGES actually loaded for this invocation, so a per-member
+# config is checked only against that member's date ranges. Note that Steps 2
+# and 3 themselves operate on the whole Run regardless of DATE_RANGES, which is
+# why a single complete date range is enough to refuse.
+#
+# Skipped for --dry-run, --validate and --resume. Override by setting
+# MAVG_FORCE_RERUN=1 on the command line. That variable is deliberately not a
+# flag: it is never set by board.sh, by any alias, or by any documented routine
+# workflow, so overwriting finished output is always an explicit act.
+
+if [[ "$DRY_RUN" != "true" && "$VALIDATE" != "true" && "$RESUME" != "true" ]]; then
+    banner "Preflight: checking for existing Part 2 outputs"
+
+    PF_COUNT=0
+    PF_LIST=""
+    for pf_idx in "${!DATE_RANGES[@]}"; do
+        PF_DR="${DATE_RANGES[$pf_idx]}"
+        PF_DIR="${HOST_DATA_DIR}/avgspc2880.wtnonavgcorrall.${PF_DR}dpirlnewrr.hpcc"
+        if [[ ! -d "$PF_DIR" ]]; then
+            continue
+        fi
+        pf_mavg=$(find "$PF_DIR" -maxdepth 1 -name "Y*aspc2nonavdisc" 2>/dev/null | wc -l)
+        pf_mavg=$(echo "$pf_mavg" | tr -d '[:space:]')
+        pf_psdr=$(find "$PF_DIR" -maxdepth 1 -name "Y*cspc2nonavdisc" 2>/dev/null | wc -l)
+        pf_psdr=$(echo "$pf_psdr" | tr -d '[:space:]')
+        if [[ "$pf_mavg" -eq 1001 && "$pf_psdr" -eq 1001 ]]; then
+            PF_COUNT=$((PF_COUNT + 1))
+            PF_LIST="${PF_LIST}${PF_DR}"$'\n'
+        fi
+    done
+
+    if [[ "$PF_COUNT" -eq 0 ]]; then
+        log_info "No complete date ranges in scope. Safe to proceed."
+    elif [[ "${MAVG_FORCE_RERUN:-0}" == "1" ]]; then
+        log_warn "MAVG_FORCE_RERUN=1 is set. Proceeding even though ${PF_COUNT} of ${NUM_DR} date range(s) are already complete."
+        while IFS= read -r pf_line; do
+            [[ -n "$pf_line" ]] && log_warn "  will be overwritten: ${pf_line}"
+        done <<< "$PF_LIST"
+    else
+        log_error "Refusing to run. ${PF_COUNT} of ${NUM_DR} date range(s) in scope already have complete Part 2 outputs:"
+        while IFS= read -r pf_line; do
+            [[ -n "$pf_line" ]] && log_error "  complete (mavg 1001, psdr 1001): ${pf_line}"
+        done <<< "$PF_LIST"
+        log_error "Step 2 and Step 3 would clear these products before any job is submitted."
+        log_error "Pick one of:"
+        log_error "  $0 --run ${RUN_NUMBER} --validate        inspect without changing anything"
+        log_error "  $0 --run ${RUN_NUMBER} --resume          continue an interrupted pass"
+        log_error "  MAVG_FORCE_RERUN=1 $0 --run ${RUN_NUMBER} [--config FILE]   overwrite on purpose"
+        exit 1
+    fi
+fi
+# ==============================================================================
 # STEP 2: Create directories on scratch
 # ==============================================================================
 banner "Step 2: Create directories (scratch_mkdir)"
