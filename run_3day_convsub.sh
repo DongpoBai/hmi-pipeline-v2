@@ -81,8 +81,8 @@ if [[ "$VALIDATE" == "true" ]]; then
             continue
         fi
 
-        binl_count=$(find "$full_dir" -maxdepth 1 -name "1*binl" 2>/dev/null | wc -l)
-        binnu_count=$(find "$full_dir" -maxdepth 1 -name "1*binnu" 2>/dev/null | wc -l)
+        binl_count=$(find "$full_dir" -maxdepth 1 -name "*.binl" 2>/dev/null | wc -l)
+        binnu_count=$(find "$full_dir" -maxdepth 1 -name "*.binnu" 2>/dev/null | wc -l)
         binl_count=$(echo "$binl_count" | tr -d '[:space:]')
         binnu_count=$(echo "$binnu_count" | tr -d '[:space:]')
 
@@ -207,8 +207,8 @@ if ! should_skip "verify"; then
             continue
         fi
 
-        binl_count=$(find "$full_dir" -maxdepth 1 -name "1*binl" 2>/dev/null | wc -l)
-        binnu_count=$(find "$full_dir" -maxdepth 1 -name "1*binnu" 2>/dev/null | wc -l)
+        binl_count=$(find "$full_dir" -maxdepth 1 -name "*.binl" 2>/dev/null | wc -l)
+        binnu_count=$(find "$full_dir" -maxdepth 1 -name "*.binnu" 2>/dev/null | wc -l)
         binl_count=$(echo "$binl_count" | tr -d '[:space:]')
         binnu_count=$(echo "$binnu_count" | tr -d '[:space:]')
 

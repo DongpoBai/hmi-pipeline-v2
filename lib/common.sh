@@ -685,8 +685,11 @@ container_to_host() {
 confirm() {
     local msg="$1"
     # non-interactive stdin: don't block on read (which errors on /dev/null).
-    # Auto-approve only when explicitly signaled (e.g. by bd run, whose caller
-    # already chose to run); otherwise decline safely rather than crash.
+    # Auto-approve only when the caller explicitly signals that the decision has
+    # already been made; otherwise decline safely rather than crash. Nothing
+    # sets this at present. It stays because a caller that has to run unattended
+    # needs some way to say so, and rediscovering that later costs more than the
+    # three lines do.
     if [[ ! -t 0 ]]; then
         [[ "${BOARD_NONINTERACTIVE:-}" == "1" ]] && return 0
         return 1
