@@ -1,0 +1,102 @@
+================================================================================
+  Part 2: m-averaging and renormalization
+================================================================================
+
+  What you were handed
+--------------------------------------------------------------------------------
+
+For each 3-day date range, Stanford gives us one power spectrum per degree l,
+from 0 to 1000. Inside the file for degree l are the 2l+1 spectra belonging to
+the individual azimuthal orders m. At l = 200 that is 401 separate spectra of
+what is physically the same set of modes.
+
+Those 2l+1 have names worth knowing, because they turn up in filenames and in
+conversation. The m = 0 spectrum is zonal, its pattern is bands of latitude with
+no variation going around. The |m| = l ones are sectoral, sliced like an orange
+from pole to pole. Everything in between is tesseral, a checkerboard.
+
+They are separate because the Sun rotates. A mode running with the rotation
+comes back Doppler-shifted up, one running against it comes back shifted down.
+What would be a single line on a non-rotating star is instead smeared across a
+band by rotational splitting, and the smear is widest at high l where there are
+the most m values to spread out.
+
+Three days is not much data. Any one of those 2l+1 spectra on its own is mostly
+noise. Averaged together they become a peak. But you cannot simply add them,
+because you would be adding a band and not a line.
+
+  What m-averaging does
+--------------------------------------------------------------------------------
+
+Undo the smear first, then add. Three steps.
+
+  1. Work out the shift. Within a multiplet, meaning all the modes sharing one n
+     and one l, the way frequency depends on m is captured by a short
+     polynomial:
+
+       nu(n,l,m) = nu(n,l) + L * sum_k a_k(n,l) * P_k(m/L),    L^2 = l(l+1)
+
+     The a_k are the splitting coefficients and the P_k are Legendre
+     polynomials. Odd k comes from rotation. Even k comes from asphericity, the
+     Sun not being quite round, and from magnetic fields. The coefficients are
+     measured by cross-correlating the spectra against each other, and here we
+     mostly use the three lowest odd ones: a1, a3, and a5.
+
+  2. Slide each spectrum back by the amount step 1 says rotation moved it.
+
+  3. Add them up. The shifted tesseral and sectoral spectra plus the unshifted
+     zonal one, combined into a single spectrum for that degree. The combination
+     is weighted, using the inverse of each spectrum's mean power between 1500
+     and 4500 microhertz, so that the noisier m values count for less.
+
+Out comes one clean spectrum per degree. Those are the Y*aspc2nonav* files, and
+there should be 1001 of them.
+
+  Two details that would otherwise look arbitrary
+--------------------------------------------------------------------------------
+
+Why l = 0 needs its own script.
+  l = 0 has 2(0)+1 = 1 azimuthal order. There is nothing to average, so the
+  m-averaging machinery skips it and you end up with 1000 files instead of 1001.
+  cp000file.sh puts the l = 0 spectrum in by hand. If your count comes back
+  1000, this is nearly always the reason.
+
+Why renormalization is a separate pass.
+  A power spectrum is not only the modes. It is the modes convolved with the
+  window function of the observing run, because the time series is finite and is
+  never perfectly gapless. That convolution changes how much total power lands
+  in the spectrum, by an amount that depends on the particular run. Two date
+  ranges with different duty cycles would not otherwise be comparable, and a
+  3-day spectrum and a 72-day one certainly would not be.
+
+  Renormalization divides that out. The number it divides by is the window sum,
+  and it arrives from the pwin step: the gap record for the run is pulled from
+  JSOC, its power spectrum is computed, and the values are written into the psdr
+  scripts before you ever run them. Out come the Y*cspc2nonav* files, again 1001
+  of them, each the same length as the Y*aspc2nonav* file of matching degree.
+
+  It is worth opening pwin.out for your run and looking at the numbers. Most
+  3-day ranges sit within a fraction of a percent of unity, which makes it easy
+  to assume the step does nothing. It is not always that way. A range that lost
+  data can carry a correction approaching ten percent, and ten percent of the
+  power is not a rounding error.
+
+  One thing renormalization does not fix: the fact that we only ever see one
+  apodized hemisphere. That is the spatial side of the same story, it shows up
+  as leakage between neighbouring degrees rather than as a scale error, and
+  Part 3 is where it gets dealt with.
+
+  Why it matters downstream
+--------------------------------------------------------------------------------
+
+Everything Part 3 measures, it measures on your output. A peak that is still
+smeared reads as a wider peak, and a wider peak reads as a larger linewidth.
+Since Gamma is the quantity this group is after, a sloppy m-average does not
+merely add noise. It adds a bias shaped exactly like signal.
+
+  Further reading
+--------------------------------------------------------------------------------
+
+  bd why    the big picture
+  Reiter et al. 2015, sec 2.2
+    https://arxiv.org/abs/1504.07493

@@ -1,0 +1,139 @@
+================================================================================
+  Why any of this
+================================================================================
+
+The Sun is loud. Just beneath its surface, convection carries heat outward in
+cells that rise, overturn, and collide, and all that churning makes noise. The
+noise gets trapped. Sound heading down is bent back up by the rising temperature
+of the deep interior, at a depth called the lower turning point, and sound
+heading up is reflected back down where the gas thins out at the surface.
+Between those two boundaries is an acoustic cavity, waves that fit it reinforce
+themselves, and the Sun rings.
+
+The trapped waves are p-modes, p for pressure, because pressure is the restoring
+force pushing the gas back each time it overshoots. Nearly everything in this
+pipeline is one. There is a second family riding along, the f-modes, which sit
+at n = 0 and are surface waves rather than sound waves, restored by gravity
+instead of pressure.
+
+Nobody strikes this bell on purpose. The convection is just noisy, and some of
+that noise happens to land at frequencies the cavity likes, so modes are
+continually being kicked and continually dying away. That is stochastic
+excitation, and it has a consequence worth holding onto: the same turbulence
+that starts a mode ringing is what stops it.
+
+Millions of these modes ring at once, and each one has spent its entire life
+inside the Sun. That is the whole point. You cannot see the solar interior, but
+you can hear it, because a wave's frequency depends on the sound speed
+everywhere along the path it travelled. Learning the inside of the Sun this way
+is global helioseismology, and it is what this group does.
+
+--------------------------------------------------------------------------------
+  How a mode gets its name
+--------------------------------------------------------------------------------
+
+Three integers.
+
+  n   Radial order. How many times the wave changes sign between the reflecting
+      layers below and above it. Roughly, how many nodes it has going down.
+
+  l   Degree. How finely the pattern is divided across the solar surface. Low l
+      is a slow global swell; high l is a fine ripple. l also sets the depth:
+      high-l waves turn around shallowly and never reach the core, low-l waves
+      plunge all the way through.
+
+  m   Azimuthal order. Which of the 2l+1 orientations of that surface pattern
+      you happen to be looking at. On a perfectly round, non-rotating star, all
+      2l+1 would ring at exactly the same frequency. That sameness is a
+      degeneracy, and it is fragile.
+
+The Sun is not that star. It rotates, so a mode travelling with the rotation and
+one travelling against it come back to you at different frequencies. The
+degeneracy is lifted and the 2l+1 spread out into a band, which is rotational
+splitting. It is inconvenient in Part 2, and it is also how the Sun's internal
+rotation gets measured in the first place.
+
+--------------------------------------------------------------------------------
+  What we actually measure
+--------------------------------------------------------------------------------
+
+Take the Doppler velocity of the solar surface and project it onto the pattern
+belonging to one (l, m). Doing that for every (l, m) is spherical harmonic
+decomposition, and it turns one image of the Sun into a set of time series, one
+per mode pattern. Fourier transform a time series, square it, and you have a
+power spectrum with a peak wherever a mode lives. Every peak carries three
+numbers, and they answer three different questions.
+
+  nu      Where the peak sits. Set by the sound speed along the wave's path.
+          This is the number that structure inversions have been built on.
+
+  Gamma   How wide the peak is, measured as the full width at half maximum. The
+          linewidth. A mode that damps quickly cannot hold a sharp frequency, so
+          the linewidth is the damping rate wearing different units, and since
+          what damps these modes is the convection that excited them, Gamma
+          reads out the convective layers directly.
+
+  A       How tall the peak is. Set by the balance between how hard convection
+          kicks the mode and how fast the mode bleeds energy away.
+
+nu has been mined for decades. Gamma has not, and that is the one this group is
+going after. If you read one more thing after this page, read bd why fit.
+
+--------------------------------------------------------------------------------
+  The six parts, end to end
+--------------------------------------------------------------------------------
+
+  1  download    Pull the (l, m) power spectra from JSOC at Stanford. One file
+                 per degree, l = 0 through 1000, for every 3-day date range.
+
+  2  mavg        Collapse the 2l+1 spectra at each degree into one, then
+                 renormalize onto a common scale. Out: 1001 spectra per date
+                 range.                                        (bd why mavg)
+
+  3  fit         Fit the peaks in those spectra and read off nu, Gamma, and A
+                 for every mode that can be resolved.          (bd why fit)
+
+  4  convsub     Convert what Part 3 produced, then difference it. Not against
+                 one designated reference, but against every other date range in
+                 the run: all 24 taken two at a time. That is 276 pairs, and it
+                 is exactly where the 276 binl and 276 binnu files come from.
+                 Each difference is binned by degree and by frequency, in each
+                 of the 13 variable directories.
+
+  5  activity    Assemble the solar activity indices covering the same dates,
+                 and difference those the same pairwise way.
+
+  6  regression  Regress the binned parameter differences against the activity
+                 differences, transpose, and locate the zero crossings, meaning
+                 the frequencies at which a mode parameter stops responding to
+                 activity one way and starts responding the other.
+
+Pairing everything with everything is worth a moment. Differencing against a
+single quiet reference would give 23 contrasts and would make the whole result
+lean on that one range being what you claimed it was. Pairing gives 276, and
+nothing has to be designated.
+
+A run is 24 consecutive 3-day date ranges. Three days is short on purpose: the
+question is how these numbers move as the Sun's activity moves, and a long
+average would smear the motion away. The cost is paid twice. A finite record of
+length T has a frequency resolution no finer than 1/T, so three days buys you
+bins about 3.9 microhertz wide and nothing sharper. And three days of any single
+(l, m) time series is mostly noise with a suggestion of a peak in it. Part 2 is
+what makes the second problem survivable.
+
+--------------------------------------------------------------------------------
+  If you want to go further
+--------------------------------------------------------------------------------
+
+  Christensen-Dalsgaard, Lecture Notes on Stellar Oscillations
+    https://users-phys.au.dk/jcd/oscilnotes/
+  Christensen-Dalsgaard 2002, Helioseismology, Rev. Mod. Phys. 74, 1073
+    https://arxiv.org/abs/astro-ph/0207403
+  Basu 2016, Global seismology of the Sun, Living Rev. Sol. Phys. 13, 2
+    https://doi.org/10.1007/s41116-016-0003-4
+  Reiter et al. 2015, the fitting method used here
+    https://arxiv.org/abs/1504.07493
+  Nigam and Kosovichev 1998, on asymmetric line profiles
+    https://doi.org/10.1086/311594
+  Houdek and Dupret 2015, on mode damping and excitation
+    https://doi.org/10.1007/lrsp-2015-8

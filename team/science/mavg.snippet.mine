@@ -1,0 +1,5 @@
+About this step: you're m-averaging. For each spherical-harmonic degree l, the
+Sun rings in 2l+1 slightly different patterns (the azimuthal orders m). Rotation
+smears them apart in frequency; m-averaging shifts them back into alignment and
+sums them, so one clean peak emerges from 2l+1 noisy ones. That's what lets a
+3-day spectrum be usable at all.

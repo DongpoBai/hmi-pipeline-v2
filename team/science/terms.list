@@ -1,0 +1,29 @@
+# Terms highlighted on first appearance in the why pages.
+# One per line. Blank lines and # comments ignored.
+# Longest match wins, so order here does not matter.
+# A trailing s is matched automatically; do not list plurals.
+# Do not add a term that is a substring of another term already listed.
+# Both would match the same text and the emphasis would nest and break.
+global helioseismology
+spherical harmonic decomposition
+acoustic cavity
+lower turning point
+stochastic excitation
+rotational splitting
+splitting coefficient
+leakage matrix
+frequency resolution
+damping rate
+linewidth
+asphericity
+degeneracy
+multiplet
+sectoral
+tesseral
+zonal
+p-mode
+f-mode
+spatial sidelobe
+temporal sidelobe
+Lorentzian
+ridge

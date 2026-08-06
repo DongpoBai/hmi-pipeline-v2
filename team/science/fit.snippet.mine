@@ -1,0 +1,7 @@
+About this step: you're fitting. Each spectrum Part 2 handed you is full of mode
+peaks, and hidden in each peak are the three numbers we're after: the frequency,
+the linewidth, and the amplitude. A peak is never alone though, it sits in a
+thicket of leaks from neighboring modes, so the fitter models the whole crowd at
+once and reads the target cleanly. That's what keeps the numbers honest. Of the
+three, the linewidth is the one that's barely been used, and it's the one this
+group is going after.

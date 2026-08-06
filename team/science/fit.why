@@ -1,0 +1,95 @@
+================================================================================
+  Part 3: peak fitting
+================================================================================
+
+  What you are extracting
+--------------------------------------------------------------------------------
+
+Part 2 handed you 1001 clean spectra per date range. Each has a sequence of
+peaks in it, and inside every peak sit three numbers: nu, Gamma, and A.
+
+Two of them are well travelled. nu, the position of the peak, has been measured
+for decades and has an established route from measurement into a picture of the
+solar interior. A, the height, gets read off along the way.
+
+Gamma is the linewidth, the full width of the peak at half its maximum, and it
+is the one still largely left on the table. It is harder to measure, because a
+position holds up better under noise than a width does, and it has no
+established route inward of the kind nu has. But the width is where the physics
+of convection lives. A peak is wide because the mode is damping, so the
+linewidth is the damping rate in different clothing, and what damps these modes
+is the same turbulence that excited them in the first place. Measure the width
+and you are measuring convection.
+
+That is what you are fitting for. A careful Gamma is worth considerably more
+than an easy one, and the rest of this page is about what stands in the way of
+getting one.
+
+  What stands in the way
+--------------------------------------------------------------------------------
+
+If the peaks were isolated you could fit them one at a time and be finished by
+the afternoon. They are not isolated, for two reasons.
+
+Spatial leakage. Spherical harmonics are orthogonal over a whole sphere, and we
+only ever see one hemisphere, apodized to suppress the noisy limb. So when the
+Doppler image is projected onto the pattern for degree l, neighbouring degrees
+leak in. The spectrum labelled l contains power that belongs to l-2, l-1, l+1,
+l+2, and outward, falling off as the separation grows. Those intruders are
+spatial sidelobes.
+
+Temporal leakage. Any gap or periodicity in the time series scatters temporal
+sidelobes around every peak, displaced by the repetition rate of the gap.
+
+Both get worse as l climbs, and for a second reason too: the linewidth itself
+grows with frequency and with degree, so the peaks get fatter exactly where they
+are also getting closer together. Past a few hundred in l, peaks from successive
+n values overlap so heavily that they stop being peaks at all and become
+continuous ridges of power. There is no version of "fit the peak" that survives
+there.
+
+  What the fitter does
+--------------------------------------------------------------------------------
+
+It fits the crowd, not the peak. The model for any one target mode includes the
+target itself plus every leak that lands near it, and the leaks do not get free
+amplitudes. Theirs are computed in advance.
+
+That precomputation is the leakage matrix. It records, for a given ridge of
+radial order n, how much of a mode of degree l' turns up in the spectrum you
+labelled l. For m-averaged spectra it is assembled by summing the squares of all
+the individual m-to-m leaks, and the sum is truncated in practice, because leaks
+die off quickly as the gaps in l and in m widen.
+
+So the fit already knows roughly how tall the contaminating peaks should stand
+relative to the target. It only has to solve for the mode you actually want.
+That is what makes a high-degree measurement possible rather than merely
+hopeful.
+
+It matters more than it sounds. Because the leaks are not symmetric around the
+target, the centre of a ridge is not the frequency of the mode. Fitting the
+ridge as though it were a single peak does not just add scatter, it puts the
+answer in the wrong place.
+
+One more thing the profile has to get right: solar p-mode peaks are not
+symmetric either. The excitation sits at a particular depth just below the
+surface, and that localization leaves the peak with one shoulder heavier than
+the other. Fitting a symmetric Lorentzian to an asymmetric peak biases nu, so
+the profile used here carries an asymmetry parameter. That is the asym you keep
+seeing in the filenames.
+
+  What comes out
+--------------------------------------------------------------------------------
+
+Fits are written to *.errfp files and gzipped, one archive per l range, with 8
+l ranges per date range. Splitting by l range is bookkeeping only. It lets the
+work run in parallel and keeps any single job from becoming enormous.
+
+  Further reading
+--------------------------------------------------------------------------------
+
+  bd why    the big picture
+  Reiter et al. 2015, sec 3
+    https://arxiv.org/abs/1504.07493
+  Nigam and Kosovichev 1998, on why the peaks are asymmetric
+    https://doi.org/10.1086/311594

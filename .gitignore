@@ -36,3 +36,14 @@ pipeline_status_*.txt
 # One-off migration scripts (the commit diff is the record)
 patch_*.py
 __pycache__/
+
+# ── Added 2026-08-06 ──
+# team-mode state lives on group storage, not in the repo and not here.
+# See STATE_DIR in team/board.sh.
+team/boards/
+team/configs/
+team/prefs/
+team/.mirror/
+team/journal.log
+team/current
+team/cadence
