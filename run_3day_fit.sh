@@ -100,6 +100,14 @@ verify_fitting() {
     banner "Verify fitting output (8 H*errfp.gz + 0 H*failed.gz per daterange)"
     local ok=0 bad=0
     local failed_drs=()
+    local blocked_drs=()
+    # Which dateranges have a fitting job in the queue right now. Queried once:
+    # calling squeue per daterange would be 24 calls and invites rate limiting.
+    # `|| true` is required: under `set -euo pipefail`, grep returning 1 on an
+    # empty queue would abort the whole function, which is the common case.
+    local running_drs=""
+    running_drs=$(squeue -u "$PIPELINE_USER" -h -o "%j" 2>/dev/null \
+        | grep '^fitjob' | sed 's/^fitjob//; s/dpirlnewrr.*//' || true)
 
     for dr in "${DATE_RANGES[@]}"; do
         local d_dir="${THEOR_HOST}/weightedhmi${dr}dpirlnewrr/${LGC_SUBDIR}/D"
@@ -119,16 +127,36 @@ verify_fitting() {
             log_info "[OK] ${dr}: 8 errfp.gz, 0 failed"
             ok=$((ok + 1))
         else
-            log_error "[FAIL] ${dr}: errfp.gz=${gz_n}/8, failed.gz=${failed_n}"
-            bad=$((bad + 1)); failed_drs+=("$dr")
+            # A leftover tD.* blocks every resubmission while still exiting 0, so
+            # the job looks COMPLETED and nothing is fitted. Only counts as blocked
+            # when no job for this daterange is running: a live fit has tD.* too.
+            local td_n
+            td_n=$(find "$d_dir" -maxdepth 1 -type d -name 'tD.*' 2>/dev/null | wc -l)
+            td_n=$(echo "$td_n" | tr -d '[:space:]')
+            if [[ "$td_n" -gt 0 ]] && ! grep -qx "$dr" <<< "$running_drs"; then
+                log_error "[BLOCKED] ${dr}: ${td_n} stale tD.* left, errfp.gz=${gz_n}/8"
+                bad=$((bad + 1)); blocked_drs+=("$dr")
+            else
+                log_error "[FAIL] ${dr}: errfp.gz=${gz_n}/8, failed.gz=${failed_n}"
+                bad=$((bad + 1)); failed_drs+=("$dr")
+            fi
         fi
     done
 
     log_info "Part 3 fitting: ${ok}/${#DATE_RANGES[@]} dateranges complete"
-    if [[ $bad -gt 0 ]]; then
-        log_error "${bad} daterange(s) need manual polishing: ${failed_drs[*]}"
+    if [[ ${#blocked_drs[@]} -gt 0 ]]; then
+        log_error "${#blocked_drs[@]} daterange(s) blocked by a stale tempdir: ${blocked_drs[*]}"
+        log_error "Nothing was fitted for these. Polishing will not help and"
+        log_error "resubmitting as-is returns the same empty result. Clear the"
+        log_error "leftovers first: see the manual, appendix on a fit that"
+        log_error "finishes in minutes with nothing to show."
+    fi
+    if [[ ${#failed_drs[@]} -gt 0 ]]; then
+        log_error "${#failed_drs[@]} daterange(s) need manual polishing: ${failed_drs[*]}"
         log_error "See 3-day instructions p.15-16: checkCoverage.sh, recompute"
         log_error "seeds for wallclock-breaking modes, resubmit with set=9999."
+    fi
+    if [[ $bad -gt 0 ]]; then
         return 1
     fi
     return 0
