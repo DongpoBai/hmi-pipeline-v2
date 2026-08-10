@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-pwinauto.py — Python replacement for pwinauto.pro (IDL)
+pwinauto.py: Python replacement for pwinauto.pro (IDL)
 
 Reads two FITS gap files from JSOC and computes window sum values
 needed for psdrenormalization in the HMI pipeline.
@@ -14,7 +14,9 @@ Example (Run 80):
         /SUM84/D1971259759/S00000/gaps.fits \
         12016 0 72 3 45.0
 
-Output format matches IDL pwinauto.pro exactly — no manual reformatting needed.
+Output columns are %14.5f and %11.5e, which is NOT the IDL pwinauto.pro
+layout (%16.5f and %13.5f). The downstream Fortran reads both, and Run 80
+went through Part 6 on this format. No manual reformatting is needed.
 """
 from __future__ import print_function
 import sys
