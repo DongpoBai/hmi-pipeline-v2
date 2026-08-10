@@ -52,6 +52,43 @@ if [[ "$TEST_CONTAINER" == "true" ]]; then
     exit $?
 fi
 
+# ── 7of7 verification (used by --validate AND by the step after aves) ─────────
+# The all7 branch writes 13 files into HOST_ZEROCROSS_DIR. The 7of7 branch is
+# separate: 3 files per variable (2aves/4aves/6aves) written into the variable
+# directories, 39 in all. Nothing counted them, so a run whose 7of7 programs
+# aborted still reported 13/13. Zero-length output is the signature of that
+# abort, so length is checked, not just presence.
+verify_7of7() {
+    local total=0 empty_total=0 bad=0
+    local var pat n z
+    for var in "${ZC_VARS[@]}"; do
+        pat="zero_crossing.hmirun${RUN_NUMBER}rev6newrr.7of7.${var}.asymrlnew86rr.?aves.out2"
+        n=$(find "${HOST_WMLTP_DIR}"/*_hmi"${MDIDN}"/final96b2b4rev6wtdhpccdprr \
+            -maxdepth 1 -name "$pat" 2>/dev/null | wc -l || true)
+        z=$(find "${HOST_WMLTP_DIR}"/*_hmi"${MDIDN}"/final96b2b4rev6wtdhpccdprr \
+            -maxdepth 1 -name "$pat" -size 0 2>/dev/null | wc -l || true)
+        n=$(echo "$n" | tr -d '[:space:]'); z=$(echo "$z" | tr -d '[:space:]')
+        total=$((total + n)); empty_total=$((empty_total + z))
+        if [[ "$n" -eq 3 && "$z" -eq 0 ]]; then
+            log_info "[OK] ${var}: 3 aves files"
+        elif [[ "$z" -gt 0 ]]; then
+            log_error "[EMPTY] ${var}: ${z} of ${n} aves files are zero length"
+            bad=$((bad + 1))
+        else
+            log_error "[MISSING] ${var}: ${n}/3 aves files"
+            bad=$((bad + 1))
+        fi
+    done
+    log_info "7of7 aves files: ${total}/39, zero length: ${empty_total}"
+    if [[ $bad -gt 0 ]]; then
+        log_error "The 7of7 branch is incomplete. Zero-length output usually means"
+        log_error "the transpose/average programs aborted; see the manual appendix"
+        log_error "on rebuilding a legacy executable."
+        return 1
+    fi
+    return 0
+}
+
 # ==============================================================================
 # MODE: --validate
 # ==============================================================================
@@ -93,13 +130,18 @@ if [[ "$VALIDATE" == "true" ]]; then
         fi
     done
 
+    banner "Checking 7of7 aves output"
+    AVES_OK=0
+    verify_7of7 || AVES_OK=1
+
     banner "Part 6 Validation Summary"
     log_info "Zero crossing files: ${PASS_COUNT}/13"
-    if [[ $FAIL_COUNT -gt 0 ]]; then
-        log_error "Missing: ${FAIL_COUNT}/13"
+    if [[ $FAIL_COUNT -gt 0 || $AVES_OK -ne 0 ]]; then
+        [[ $FAIL_COUNT -gt 0 ]] && log_error "Missing: ${FAIL_COUNT}/13"
+        [[ $AVES_OK -ne 0 ]] && log_error "7of7 aves output incomplete"
         exit 1
     else
-        log_info "All 13 zero crossing output files present!"
+        log_info "All 13 zero crossing files present, all 39 aves files non-empty!"
         exit 0
     fi
 fi
@@ -240,6 +282,10 @@ if ! should_skip "aves"; then
         "cd ${CONT_SCRIPTS_DIR} && ./preptranszerohmiwtrev6rr-dp-avgonly.sh ${RUN_NUMBER}"
 
     save_checkpoint "aves"
+    if [[ "$DRY_RUN" != "true" ]]; then
+        banner "Verify 7of7 aves output (39 files, none zero length)"
+        verify_7of7 || exit 1
+    fi
 fi
 
 # ==============================================================================
