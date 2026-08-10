@@ -81,12 +81,19 @@ if [[ "$VALIDATE" == "true" ]]; then
     # Check pwin files
     PWIN_DIR="${HOST_WINDOWTEST_DIR}/HMIrun${RUN_NUMBER}"
     if [[ -d "$PWIN_DIR" ]]; then
-        pwin_count=$(ls "$PWIN_DIR" 2>/dev/null | wc -l)
+        pwin_count=$(ls "$PWIN_DIR"/pwin.* 2>/dev/null | wc -l)
         pwin_count=$(echo "$pwin_count" | tr -d '[:space:]')
-        if [[ "$pwin_count" -ge 26 ]]; then
-            log_info "[PWIN] HMIrun${RUN_NUMBER}: ${pwin_count} files (OK)"
+        if [[ "$pwin_count" -eq 26 ]]; then
+            log_info "[PWIN] HMIrun${RUN_NUMBER}: ${pwin_count} pwin files (OK)"
         else
-            log_warn "[PWIN] HMIrun${RUN_NUMBER}: ${pwin_count} files (expected >= 26)"
+            log_warn "[PWIN] HMIrun${RUN_NUMBER}: ${pwin_count} pwin files (expected 26)"
+        fi
+        bad_mdidn=$(ls "$PWIN_DIR"/pwin.03.* 2>/dev/null | sed 's/.*\.//' \
+            | awk -v m="$MDIDN" 'length($1)!=length(m) || $1+0<m+0 || $1+0>m+69' | wc -l)
+        bad_mdidn=$(echo "$bad_mdidn" | tr -d '[:space:]')
+        if [[ "$bad_mdidn" -gt 0 ]]; then
+            log_warn "[PWIN] ${bad_mdidn} pwin.03 file(s) have a truncated or out-of-range MDIDN"
+            log_warn "[PWIN] fix with: cd ${HOST_WINDOWTEST_DIR} && ./changMDIDN HMIrun${RUN_NUMBER}"
         fi
     else
         log_warn "[PWIN] Directory not found: ${PWIN_DIR}"
@@ -352,43 +359,62 @@ if ! should_skip "pwin_manual"; then
     fi
 
     pause_for_manual "Generate window sum values on Stanford" \
-"You need to SSH to Stanford solarport and run the pwin script.
-Copy and paste these commands:
+"Stanford's pwin.auto.sh no longer works. Its failures look like missing data:
+without show_info on the path it reports no records and walks the date
+backwards, and with the path fixed it calls IDL, which now runs in demo mode
+and cannot write files. Use Stanford only to locate the two gap files, and do
+the arithmetic here.
 
-  1. SSH to solarport:
+  1. On solar3, find the two gaps.fits paths:
      ssh -X -o ConnectTimeout=15 YOUR_USERNAME@solarport.stanford.edu
-
-  2. Switch to solar3 node:
      ssh -x solar3.stanford.edu
+     export PATH=/home/phil/jsoc/bin/linux_x86_64:\$PATH
+     show_info hmi.v_sht_gaps_72d'[${MDIDN}d]'    -AP JSOC_DBUSER=readonlyuser
+     show_info hmi.v_sht_gf_gaps_72d'[${MDIDN}d]' -AP JSOC_DBUSER=readonlyuser
 
-  3. Run pwin:
-     cd /home/spinkert/window_test
-     ./pwin.auto.sh ${MDIDN} 72 ${INSTRUMENT}
+     If one has no record, do NOT shift the date to find one. It means JSOC has
+     not generated that MDIDN yet. Ask Baldner.
 
-  4. Rename output directory:
-     mv ${INSTRUMENT^^}.* HMIrun${RUN_NUMBER}
-     (If it was already created in the right name, skip this.)
+  2. On solarport, rename them apart and send both in one transfer:
+     exit                       # back to solarport, NOT solar3
+     mkdir -p /tmp/pwin${RUN_NUMBER}
+     cp <path1>/gaps.fits /tmp/pwin${RUN_NUMBER}/gaps1_${RUN_NUMBER}.fits
+     cp <path2>/gaps.fits /tmp/pwin${RUN_NUMBER}/gaps2_${RUN_NUMBER}.fits
+     ls -l /tmp/pwin${RUN_NUMBER}/            # each about 138 KB
+     scp /tmp/pwin${RUN_NUMBER}/*.fits \\
+         YOUR_USERNAME@hpc-transfer1.usc.edu:/scratch1/YOUR_USERNAME/
+     rm -rf /tmp/pwin${RUN_NUMBER}
 
-  5. Copy results back to USC (from solarport, NOT solar3):
-     exit  # back to solarport
-     scp /home/spinkert/window_test/HMIrun${RUN_NUMBER}/* \\
-         YOUR_USERNAME@hpc-transfer1.usc.edu:${HOST_WINDOWTEST_DIR}/HMIrun${RUN_NUMBER}/
+  3. On Discovery, compute the window sums:
+     mkdir -p /scratch1/$USER/pwin${RUN_NUMBER} && cd /scratch1/$USER/pwin${RUN_NUMBER}
+     mv /scratch1/$USER/gaps?_${RUN_NUMBER}.fits .
+     export OPENBLAS_NUM_THREADS=1
+     python3 /project2/erhodes_44/pipeline-v2/pwinauto.py \\
+         gaps1_${RUN_NUMBER}.fits gaps2_${RUN_NUMBER}.fits ${MDIDN} 0 72 3 45.0
 
-  6. Fix pwin filenames (back on Discovery):
-     cd ${HOST_WINDOWTEST_DIR}
-     ./changMDIDN HMIrun${RUN_NUMBER}
+     Arguments after the two files: MDIDN, offset 0, 72-day span, 3-day step,
+     45-second sampling.
 
-  7. Set permissions:
-     chgrp erhodes_44 ${PWIN_DIR}/*
-     chmod g+rw ${PWIN_DIR}/*
+  4. Check the names before deploying, not just the count:
+     ls pwin.* | wc -l                        # 26
+     ls pwin.03.* | sed 's/.*\\.//' | sort | head -3
 
-Expected: 26 files in ${PWIN_DIR}/
-  (1 per each of 24 three-day sets + 1 for 72-day + 1 pwin.out)
+     You want the full five-digit MDIDN (${MDIDN}), not a four-digit one. A
+     leading digit has been dropped before. If it happens:
+       cd ${HOST_WINDOWTEST_DIR} && ./changMDIDN HMIrun${RUN_NUMBER}
+
+  5. Deploy:
+     mv pwin.* ${PWIN_DIR}/
+     chgrp erhodes_44 ${PWIN_DIR}/* 2>/dev/null
+     chmod g+rw ${PWIN_DIR}/* 2>/dev/null
+
+Expected: 26 pwin files in ${PWIN_DIR}/
+  (24 pwin.03.* + 1 pwin.72.* + 1 pwin.out)
 "
 
     # Verify pwin files
     if [[ "$DRY_RUN" != "true" ]]; then
-        pwin_count=$(ls "$PWIN_DIR" 2>/dev/null | wc -l)
+        pwin_count=$(ls "$PWIN_DIR"/pwin.* 2>/dev/null | wc -l)
         pwin_count=$(echo "$pwin_count" | tr -d '[:space:]')
         if [[ "$pwin_count" -lt 26 ]]; then
             log_warn "Found only ${pwin_count} files in ${PWIN_DIR} (expected 26)"
