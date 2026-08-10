@@ -79,7 +79,7 @@ def main():
             startday + offdays, ndays,
             np.mean(g0_full), gfdc_full, 1.0 / gfdc_full))
 
-        # Full-range power spectrum — IDL format: %14.5f  %11.5e
+        # Full-range power spectrum. Columns: %14.5f  %11.5e (see the header)
         px_full = np.abs(np.fft.fft(gx_full)) ** 2
         df = 1e6 / tstep / ndt
         nx = int(200 / df)
