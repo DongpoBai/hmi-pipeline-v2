@@ -62,6 +62,22 @@ fi
 BINDS="$(get_sing_binds)"
 
 fix_count=0
+unchanged_count=0
+failed_count=0
+
+# A date range whose sbatch files are known to work on the current cluster.
+# fix_mavg rewrites from these rather than patching in place: within one run the
+# 24 sbatch files are byte-identical apart from the date, so substituting the
+# date reproduces them exactly. Override if this one is ever retired.
+MAVG_TEMPLATE_DR="${MAVG_TEMPLATE_DR:-250710to0712}"
+
+# Report only what is verifiably true: re-read the file and fail loudly if the
+# thing we claimed to remove is still in it.
+verify_no_legacy() {
+    local f="$1"
+    grep -qE '/project/erhodes_44|module load apptainer/1\.3\.6' "$f" 2>/dev/null && return 1
+    return 0
+}
 
 # ── Fix Part 2 (mavg) SLURM files ────────────────────────────────────────────
 fix_mavg() {
@@ -72,15 +88,30 @@ fix_mavg() {
         local dir="${data_dir}/avgspc2880.wtnonavgcorrall.${dr}dpirlnewrr.hpcc"
         for f in "${dir}"/sbatch*.slurm; do
             [[ -f "$f" ]] || continue
-            # Check if already has bind mounts
-            if ! grep -q 'bind.*project2.*:/home' "$f" 2>/dev/null; then
-                if [[ "$DRY_RUN" == "true" ]]; then
-                    echo "  [DRY] Would fix: $(basename $f) in $dr"
-                else
-                    sed -i 's|singularity exec $cont|singularity exec '"${BINDS}"' $cont|' "$f"
-                    echo "  Fixed: $(basename $f) in $dr"
-                fi
+            local base tmpl
+            base=$(basename "$f")
+            tmpl="${data_dir}/avgspc2880.wtnonavgcorrall.${MAVG_TEMPLATE_DR}dpirlnewrr.hpcc/${base/$dr/$MAVG_TEMPLATE_DR}"
+            if verify_no_legacy "$f" && grep -q 'bind.*project2.*:/home' "$f" 2>/dev/null; then
+                unchanged_count=$((unchanged_count + 1))  # already current
+                continue
+            fi
+            if [[ ! -f "$tmpl" ]]; then
+                echo "  ERROR: no template at $tmpl"
+                echo "         set MAVG_TEMPLATE_DR to a date range that works."
+                exit 1
+            fi
+            if [[ "$DRY_RUN" == "true" ]]; then
+                echo "  [DRY] Would rewrite from template: ${base} in $dr"
                 fix_count=$((fix_count + 1))
+                continue
+            fi
+            sed "s/${MAVG_TEMPLATE_DR}/${dr}/g" "$tmpl" > "$f"
+            if verify_no_legacy "$f" && grep -q "$dr" "$f"; then
+                echo "  Fixed: ${base} in $dr"
+                fix_count=$((fix_count + 1))
+            else
+                echo "  FAILED: ${base} in $dr still has legacy content"
+                failed_count=$((failed_count + 1))
             fi
         done
     done < "$DR_LIST"
@@ -103,6 +134,10 @@ fix_fit() {
                     echo "  [DRY] Would fix path: $(basename $f) in $dr"
                 else
                     sed -i 's|/project/erhodes_44|/project2/erhodes_44|g' "$f"
+                    if grep -q '/project/erhodes_44' "$f" 2>/dev/null; then
+                        echo "  FAILED: $(basename $f) in $dr still has /project/"
+                        failed_count=$((failed_count + 1)); continue
+                    fi
                     echo "  Fixed path: $(basename $f) in $dr"
                 fi
                 fix_count=$((fix_count + 1))
@@ -117,6 +152,10 @@ fix_fit() {
                     echo "  [DRY] Would add module load: $(basename $f) in $dr"
                 else
                     sed -i 's|source /project2/erhodes_44/rcf-04/astro10/singularity/images/slurm.bashrc|source /project2/erhodes_44/rcf-04/astro10/singularity/images/slurm.bashrc\nsource /etc/profile.d/modules.sh\nmodule load apptainer/1.3.6|' "$f"
+                    if ! grep -q 'module load apptainer' "$f" 2>/dev/null; then
+                        echo "  FAILED: $(basename $f) in $dr, module load not added"
+                        failed_count=$((failed_count + 1)); continue
+                    fi
                     echo "  Added module load: $(basename $f) in $dr"
                 fi
                 fix_count=$((fix_count + 1))
@@ -134,4 +173,11 @@ case "$PART" in
 esac
 
 echo ""
-echo "Done. ${fix_count} files fixed."
+echo "Done. ${fix_count} fixed, ${unchanged_count} already current, ${failed_count} failed."
+if [[ "$failed_count" -gt 0 ]]; then
+    echo ""
+    echo "A FAILED line means the edit did not take: the file was re-read and"
+    echo "still contains what this script claimed to remove. Do not assume those"
+    echo "files are usable because the script exited cleanly."
+    exit 1
+fi
