@@ -178,7 +178,13 @@ validate_member() {
     local wrapper_path="${PIPELINE_DIR}/${wrapper}"
     # Run the wrapper's validate mode; capture output. Do not fail on nonzero.
     local out
-    out="$("$wrapper_path" --run "$run" --config "$conf" --validate 2>&1)" || true
+    # Reading the board is read-only, so it has to work for a member who has
+    # not set LOG_DIR yet. The default is the shared install, which the group
+    # cannot write, and the wrapper aborts before printing any counts.
+    local bd_tmp="${TMPDIR:-/tmp}/bd-${USER}"
+    mkdir -p "$bd_tmp" 2>/dev/null || true
+    out="$(LOG_DIR="$bd_tmp" CHECKPOINT_DIR="$bd_tmp" \
+        "$wrapper_path" --run "$run" --config "$conf" --validate 2>&1)" || true
     # Parse per-date-range lines. Be tolerant of the log prefix ([INFO]/[ERROR]).
     # Match the "<DR>: mavg=.../... psdr=.../..." pattern.
     printf '%s\n' "$out" | while IFS= read -r line; do
@@ -222,7 +228,13 @@ validate_all() {
     fi
 
     local out
-    out="$("$wrapper_path" --run "$run" --config "$conf" --validate 2>&1)" || true
+    # Reading the board is read-only, so it has to work for a member who has
+    # not set LOG_DIR yet. The default is the shared install, which the group
+    # cannot write, and the wrapper aborts before printing any counts.
+    local bd_tmp="${TMPDIR:-/tmp}/bd-${USER}"
+    mkdir -p "$bd_tmp" 2>/dev/null || true
+    out="$(LOG_DIR="$bd_tmp" CHECKPOINT_DIR="$bd_tmp" \
+        "$wrapper_path" --run "$run" --config "$conf" --validate 2>&1)" || true
 
     printf '%s\n' "$out" | while IFS= read -r line; do
         case "$part" in
