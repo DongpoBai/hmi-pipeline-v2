@@ -581,7 +581,7 @@ cmd_assign() {
     mapfile -t assignment < <(assign_ranges "$total" "${names[@]}")
 
     # ── Preview (dry-run) or, later, real write ──
-    log "Run ${run} ${part}: dividing ${total} date ranges among ${#names[@]} people"
+    log "Run ${run} ${part}: dividing ${total} sets among ${#names[@]} people"
     log ""
 
     # Group by owner for the "dealing has ceremony" line.
@@ -593,7 +593,7 @@ cmd_assign() {
             [[ "$rowname" == "$name" ]] && mine_idx+=("$rowidx")
         done <<< "$(printf '%s\n' "${assignment[@]}")"
         local first="${mine_idx[0]}" last="${mine_idx[-1]}"
-        printf '  %s takes %d ranges (%02d-%02d):\n' "$name" "${#mine_idx[@]}" "$first" "$last"
+        printf '  %s takes %d sets (%02d-%02d):\n' "$name" "${#mine_idx[@]}" "$first" "$last"
         # list the actual date ranges, 3 per line, indented
         local col=0 j
         printf '     '
@@ -627,7 +627,7 @@ cmd_assign() {
 
     # 1) per-member configs (skip if placeholders; only real ranges make sense)
     if [[ "${ranges[0]}" == DR_PLACEHOLDER_* ]]; then
-        die "assign: refusing real write with placeholder ranges (config ${conf} has no DATE_RANGES)"
+        die "assign: refusing real write with placeholder sets (config ${conf} has no DATE_RANGES)"
     fi
     local name
     for name in "${names[@]}"; do
@@ -688,10 +688,10 @@ print_card() {
     log ""
     printf '%s\n' "────────────────────────────────────────────────────────"
     if [[ "$live" == "OK" ]]; then
-        printf 'Card %s, %s.  %s\n' "$idx" "$dr" "$(goal 'This one is already finished.')"
+        printf 'Set %s, %s.  %s\n' "$idx" "$dr" "$(goal 'This one is already finished.')"
         log "Left here in case you want to see what it took."
     else
-        printf 'Card %s, %s.\n' "$idx" "$dr"
+        printf 'Set %s, %s.\n' "$idx" "$dr"
     fi
 
     case "$part" in
@@ -728,7 +728,7 @@ print_card() {
         printf '  %s\n' "$(cmd 'squeue -u $USER')"
         printf '  %s  %s\n' "$(cmd "ls Y*${C_DIFF}c${C_RESET}${C_CMD}spc2nonavdisc | wc -l")" "-> $(goal '1001')"
         log ""
-        printf 'Both counts at %s and this card is done.\n' "$(goal '1001')"
+        printf 'Both counts at %s and this set is done.\n' "$(goal '1001')"
         ;;
       fit)
         log ""
@@ -772,10 +772,10 @@ cmd_cards() {
             --*)   die "unknown flag for ${part}: $1" ;;
             *)
                 if [[ "$1" =~ ^[0-9]+$ ]]; then
-                    [[ -z "$want_idx" ]] || die "${part}: give at most one card number"
+                    [[ -z "$want_idx" ]] || die "${part}: give at most one set number"
                     want_idx="$(printf '%02d' "$((10#$1))")"
                 else
-                    die "${part}: expected a card number, got '$1'. To see the whole board use: bd show ${part}"
+                    die "${part}: expected a set number, got '$1'. To see the whole board use: bd show ${part}"
                 fi
                 shift ;;
         esac
@@ -798,7 +798,7 @@ cmd_cards() {
     done < <(board_rows "$board")
 
     if [[ ${#my_idx[@]} -eq 0 ]]; then
-        log "You have no cards on the ${part} run ${run} board."
+        log "You have no sets on the ${part} run ${run} board."
         log "Everyone's assignments are visible with: $(cmd "bd show ${part} ${run}")"
         return 0
     fi
@@ -841,7 +841,7 @@ cmd_cards() {
             print_card "$part" "$run" "${my_idx[$i]}" "${my_dr[$i]}" "${LIVE[${my_dr[$i]}]:-}"
         done
         if [[ $found -eq 0 ]]; then
-            log "Card ${want_idx} is not one of yours on the ${part} run ${run} board."
+            log "Set ${want_idx} is not one of yours on the ${part} run ${run} board."
             log "Yours are: ${my_idx[*]}"
             log "The whole board: $(cmd "bd show ${part} ${run}")"
         fi
@@ -849,7 +849,7 @@ cmd_cards() {
     fi
 
     # ── all my cards ──
-    printf 'Run %s %s. %d date ranges are yours, %s finished.\n' \
+    printf 'Run %s %s. %d sets are yours, %s finished.\n' \
         "$run" "$part" "$n" "$(goal "${n_done}")"
     if [[ $live_n -eq 0 ]]; then
         log "(live counts unavailable, so the finished tally may be stale)"
@@ -863,11 +863,11 @@ cmd_cards() {
         fi
     done
     log ""
-    log "Do them one at a time. The commands for a single card:"
+    log "Do them one at a time. The commands for a single set:"
     printf '  %s\n' "$(cmd "bd ${part} ${my_idx[0]}")"
     log ""
-    log "Full commands for every card follow. Nothing needs editing: the date"
-    log "ranges are already filled in, so copy and paste."
+    log "Full commands for every set follow. Nothing needs editing: the"
+    log "date ranges are already filled in, so copy and paste."
 
     for (( i=0; i<n; i++ )); do
         print_card "$part" "$run" "${my_idx[$i]}" "${my_dr[$i]}" "${LIVE[${my_dr[$i]}]:-}"
@@ -876,8 +876,8 @@ cmd_cards() {
     log ""
     printf '%s\n' "────────────────────────────────────────────────────────"
     log ""
-    log "There is nothing to report when a card is finished."
-    printf '%s counts the files itself and turns the card %s.\n' \
+    log "There is nothing to report when a set is finished."
+    printf '%s counts the files itself and turns the set %s.\n' \
         "$(cmd "bd show ${part} ${run}")" "$(goal 'green')"
 
     # Cards finished by someone other than you. The board no longer records who
@@ -937,7 +937,7 @@ cmd_show() {
         fi
     done < <(board_rows "$board")
 
-    [[ $total -gt 0 ]] || die "show: board has no cards: ${board}"
+    [[ $total -gt 0 ]] || die "show: board has no sets: ${board}"
 
     # ── live completion, counted rather than declared ────────────────────────
     # The board records who owns which card. Whether a card is finished is not
@@ -1030,7 +1030,7 @@ cmd_show() {
         for o in "${owner_order[@]}"; do [[ "$o" == "$filter_name" ]] && found=1; done
         if [[ $found -eq 0 ]]; then
             log ""
-            log "${filter_name} has no cards on this board."
+            log "${filter_name} has no sets on this board."
             return 0
         fi
         print_person "$filter_name"
@@ -1296,7 +1296,7 @@ cmd_help() {
         return 0
     fi
 
-    log "These cards have no output yet."
+    log "These sets have no output yet."
     log ""
     local i
     for (( i=0; i<${#idle_idx[@]}; i++ )); do
@@ -1321,24 +1321,24 @@ main() {
 board.sh: team-mode for pipeline-v2
 
 For members:
-  bd mavg                  your date ranges and the exact commands to run them
-  bd mavg <card>           just one card, for example: bd mavg 07
+  bd mavg                  your sets and the exact commands to run them
+  bd mavg <set>            just one set, for example: bd mavg 07
   bd fit                   same, for the fitting part
   bd show mavg             the whole board, everyone
   bd why                   what all of this is for, start here
   bd why mavg              what m-averaging is actually doing
   bd why fit               what the fitter is actually doing
-  bd set science <choice>  how much science to show alongside your cards
-  bd help                  cards nobody has started, if there are any
+  bd set science <choice>  how much science to show alongside your sets
+  bd help                  sets nobody has started, if there are any
 
 For the lead:
   bd assign <part> <run> <names...>   deal the date ranges to people
-  bd show <part> [run] [name]         the board, or one person's cards
+  bd show <part> [run] [name]         the board, or one person's sets
 
 part is mavg or fit. Add --dry-run to preview (assign).
 Add --run <run> to any member command to look at a run other than the current one.
 
-Nobody reports completion. A card counts as finished when its output files are
+Nobody reports completion. A set counts as finished when its output files are
 all there, which bd show and bd mavg check for themselves every time they run.
 EOF
             ;;
