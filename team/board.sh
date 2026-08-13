@@ -552,7 +552,7 @@ cmd_assign() {
         die "assign: board already exists: ${board_file}
   To rebuild from scratch (backs up the old one): add --fresh
   To edit by hand: the board is plain text.
-  (Incremental re-assign preserving done cards is a separate command, coming later.)"
+  (Incremental re-assign preserving done sets is a separate command, coming later.)"
     fi
 
     local conf="${CONFIG_DIR}/run${run}.conf"
@@ -607,7 +607,16 @@ cmd_assign() {
     log ""
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        [[ -f "$board_file" ]] && log_dry "board exists; would ${fresh:+--fresh }back up and rebuild"
+        # A board that already exists stops a real run unless --fresh is given.
+        # Say so, and do not go on to list writes that would never happen.
+        if [[ -f "$board_file" && "$fresh" != "true" ]]; then
+            log_dry "board exists: ${board_file}"
+            log_dry "a real run would stop here. Add --fresh to back it up and rebuild."
+            log_dry "the split above is what --fresh would write."
+            log_dry "no files written."
+            return 0
+        fi
+        [[ -f "$board_file" ]] && log_dry "board exists; --fresh would back it up first"
         log_dry "would create board:   ${board_file}"
         log_dry "would create configs: ${CONFIGS_DIR}/${part}_run${run}_<name>.conf  (one per member)"
         log_dry "would set current:    ${part} -> ${run}  in ${CURRENT}"
