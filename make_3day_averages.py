@@ -9,7 +9,13 @@ One line per 3-day set (24 per run):
 Usage:
   python3 make_3day_averages.py --run 80 --outdir ~/p5test --compare $C
   python3 make_3day_averages.py --run 81 --outdir ~/p5run81
-Nothing is ever written to the comparison directory by this script.
+  python3 make_3day_averages.py --run 81 --outdir $C --allow-comparison   # what run_3day_activity.sh does
+Writing into the comparison directory needs --allow-comparison; without it the
+script refuses, so a hand run cannot land there by accident.
+
+Verified 2026-09-28 against the hand-made files for Runs 76-79 (same daily
+input): 575/576 lines byte-identical; the one exception is a last-digit
+rounding in a std column (Run 78 MgII row 16).
 """
 import argparse
 import datetime
@@ -119,6 +125,8 @@ def main():
     ap.add_argument("--outdir", required=True, help="where to write; must not be the comparison dir")
     ap.add_argument("--stamp", help="MMDDYY date stamp in the file names (default: today)")
     ap.add_argument("--compare", metavar="DIR", help="compare against existing files in DIR, write nothing")
+    ap.add_argument("--allow-comparison", action="store_true",
+                    help="permit --outdir to be the comparison directory (used by run_3day_activity.sh)")
     args = ap.parse_args()
 
     daily = args.daily or os.path.join(COMPARISON, f"dailyactivityvalueshmirun{args.run}.dat")
@@ -141,8 +149,8 @@ def main():
         sys.exit(0 if bad == 0 else 1)
 
     outdir = os.path.realpath(os.path.expanduser(args.outdir))
-    if outdir == os.path.realpath(COMPARISON):
-        sys.exit("ERROR: refusing to write into the comparison directory")
+    if outdir == os.path.realpath(COMPARISON) and not args.allow_comparison:
+        sys.exit("ERROR: refusing to write into the comparison directory (pass --allow-comparison)")
     os.makedirs(outdir, exist_ok=True)
     stamp = args.stamp or datetime.date.today().strftime("%m%d%y")
     for name, _ in INDICES:

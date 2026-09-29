@@ -2,29 +2,30 @@
 # ==============================================================================
 # run_3day_activity.sh -- Part 5 (Activity Indices) top-level wrapper
 #
-# Part 5 has three stages, one of which is a manual wall:
-#   Stage 1  daily indices   -- solar-activity-pipeline/generate_run.sh (automated)
-#   Stage 2  3day averages    -- produced BY HAND (Dr. Rhodes): six 3day*averages
-#                                files. The wrappers cannot cross this.
-#   Stage 3+4 merge + diff    -- run_activity_merge.sh --then-diff (automated)
+# Part 5 has three stages:
+#   Stage 1  daily indices   -- solar-activity-pipeline/generate_run.sh
+#   Stage 2  3day averages    -- make_3day_averages.py: the six 3day*averages
+#                                files, built from the daily indices. Dr. Rhodes
+#                                used to make these by hand; the script reproduces
+#                                his files (Runs 76-79: 575/576 lines byte-identical).
+#   Stage 3+4 merge + diff    -- run_activity_merge.sh --then-diff
 #
-# This wrapper automates stages 1, 3, and 4, and stops cleanly at the stage-2
-# wall: it runs stage 1, then checks whether the six manual files are present.
-# If they are, it runs merge+diff. If not, it reports what is missing and exits,
-# so you can come back and re-run once Dr. Rhodes has produced them.
+# If the six files for this run are already in the comparison directory (made
+# by hand, or by an earlier run of this wrapper), stage 2 leaves them alone and
+# uses them. Otherwise it builds them there, then carries on.
 #
 # It does NOT source lib/common.sh -- Part 5 runs outside the container, so it
 # stays lightweight like its sub-scripts.
 #
 # Usage:
-#   ./run_3day_activity.sh 79                 # stage 1 -> check -> merge+diff
+#   ./run_3day_activity.sh 79                 # stage 1 -> 2 -> merge+diff
 #   ./run_3day_activity.sh 79 --dry-run        # show what each stage would do
 #   ./run_3day_activity.sh 79 --skip-daily     # skip stage 1 (already generated)
 #   ./run_3day_activity.sh 79 --auto-update    # pass --auto-update to stage 1
 #
 # Env:
 #   ACTIVITY_PIPELINE_DIR  default /project2/erhodes_44/solar-activity-pipeline
-#   COMPARISON_DIR         default .../mdi/lnu/comparison (passed through)
+#   COMPARISON_DIR         default .../mdi/lnu/comparison
 # ==============================================================================
 set -euo pipefail
 
@@ -32,6 +33,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_BASE="${PROJECT_BASE:-/project2/erhodes_44}"
 ACTIVITY_PIPELINE_DIR="${ACTIVITY_PIPELINE_DIR:-${PROJECT_BASE}/solar-activity-pipeline}"
 MERGE_PY="${MERGE_PY:-${SCRIPT_DIR}/merge_3day_averages.py}"
+MAKE_PY="${MAKE_PY:-${SCRIPT_DIR}/make_3day_averages.py}"
+COMPARISON_DIR="${COMPARISON_DIR:-${PROJECT_BASE}/rcf-04/astro10/data/mdi/lnu/comparison}"
+export COMPARISON_DIR
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 RUN=""
@@ -78,24 +82,47 @@ else
     "$GEN" "${gen_args[@]}"
 fi
 
-# ── Stage-2 wall: are the six manual 3day*averages files present? ────────────
-# We reuse merge_3day_averages.py's own discovery (--dry-run): it derives the
-# date range from the daily-indices file and checks all six inputs, so we don't
-# re-implement the glob here. Its exit code IS the wall check.
-say "Checking for the six manual 3day*averages inputs (Stage 2, produced by Dr. Rhodes)..."
-if python3 "$MERGE_PY" --run "$RUN" --start-seq 1 --dry-run >/dev/null 2>&1; then
-    say "  All six inputs present."
+# ── Stage 2: the six 3day*averages files ─────────────────────────────────────
+# merge_3day_averages.py --dry-run derives the date range from the daily-indices
+# file and checks all six inputs, so its exit code says whether they exist.
+six_present() { python3 "$MERGE_PY" --run "$RUN" --start-seq 1 --dry-run >/dev/null 2>&1; }
+
+say "Stage 2 (3-day averages): checking for the six 3day*averages files..."
+if six_present; then
+    say "  All six already present; using them."
 else
-    echo "" >&2
-    say "  Stage 2 is not complete yet -- the six manual 3day*averages files are"
-    say "  not all present. This is the manual wall: Dr. Rhodes produces them by"
-    say "  hand for this run's date range. Details from the merge step:"
-    echo "" >&2
-    # re-run without suppression so the user sees exactly what's missing
-    python3 "$MERGE_PY" --run "$RUN" --start-seq 1 --dry-run 2>&1 | sed 's/^/    /' || true
-    echo "" >&2
-    say "  Once all six are in place, re-run:  $(basename "$0") ${RUN} --skip-daily"
-    exit 2
+    DAILY="${COMPARISON_DIR}/dailyactivityvalueshmirun${RUN}.dat"
+    STAMP="$(date +%m%d%y)"
+    make_args=(--run "$RUN" --daily "$DAILY" --outdir "$COMPARISON_DIR" --allow-comparison --stamp "$STAMP")
+    if [[ ! -s "$DAILY" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            say "  [dry-run] not present yet; stage 1 would write ${DAILY},"
+            say "  then this stage would run: python3 ${MAKE_PY} ${make_args[*]}"
+            say "  [dry-run] merge + differences preview needs those files; stopping here."
+            exit 0
+        fi
+        echo "ERROR: daily indices file missing: ${DAILY}" >&2
+        echo "       Run without --skip-daily so stage 1 produces it." >&2
+        exit 1
+    fi
+    [[ -f "$MAKE_PY" ]] || { echo "ERROR: not found: ${MAKE_PY}" >&2; exit 1; }
+    if [[ "$DRY_RUN" == "true" ]]; then
+        say "  Not present. [dry-run] would run: python3 ${MAKE_PY} ${make_args[*]}"
+        say "  [dry-run] merge + differences preview needs those files; stopping here."
+        exit 0
+    fi
+    say "  Not present; building them: python3 ${MAKE_PY} ${make_args[*]}"
+    if ! python3 "$MAKE_PY" "${make_args[@]}" 2>&1 | sed 's/^/    /'; then
+        echo "ERROR: make_3day_averages.py stopped (see above); nothing merged." >&2
+        exit 2
+    fi
+    chgrp erhodes_44 "$COMPARISON_DIR"/3day*averages.*."$STAMP".dat 2>/dev/null || true
+    if ! six_present; then
+        echo "ERROR: the six files are still not all found after building them." >&2
+        python3 "$MERGE_PY" --run "$RUN" --start-seq 1 --dry-run 2>&1 | sed 's/^/    /' || true
+        exit 2
+    fi
+    say "  Built all six."
 fi
 
 # ── Stage 3+4: merge then differences ────────────────────────────────────────

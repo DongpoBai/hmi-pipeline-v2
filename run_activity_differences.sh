@@ -19,6 +19,16 @@
 #   - The 6 per-run .f are identical except the run number, so this driver is
 #     valid for any run whose exe has been built.
 #
+# Where things live (2026-09-28):
+#   - Work happens in EXE_DIR (ACTIV_EXE_DIR, else the pipeline dir): the .f is
+#     generated there, compiled there, and the exe runs there.
+#   - The C-stage input is read from COMPARISON_DIR, where merge_3day_averages.py
+#     writes it, and copied into EXE_DIR because the exe opens it by bare name.
+#   - Afterwards the .f, the exe and average7activdiffshmirunNN.dat are copied
+#     to COMPARISON_DIR, the place Dr. Rhodes keeps the per-run programs and
+#     where Part 6 and validate_run.sh read the product. An existing file there
+#     that differs is left untouched and reported, never overwritten.
+#
 # Usage:
 #   ./run_activity_differences.sh 80              # run it
 #   ./run_activity_differences.sh 80 --dry-run    # show what it would do
@@ -28,6 +38,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPARISON_DIR="${COMPARISON_DIR:-/project2/erhodes_44/rcf-04/astro10/data/mdi/lnu/comparison}"
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 RUN_NUMBER=""
@@ -74,13 +85,19 @@ EXE_PATH="${EXE_DIR}/${EXE}"
 
 # Per-run exe is built mechanically from the run-74 template (sed the run
 # number, compile with ifort -- no libraries, no per-run logic). Build it here
-# if missing so the operator does not have to do it by hand.
-TEMPLATE_F="${EXE_DIR}/hmirun74activity7differences.f"
+# if missing so the operator does not have to do it by hand. The template is
+# looked for in EXE_DIR, then the pipeline dir, then COMPARISON_DIR.
+TEMPLATE_F=""
+for d in "$EXE_DIR" "$SCRIPT_DIR" "$COMPARISON_DIR"; do
+    if [[ -f "${d}/hmirun74activity7differences.f" ]]; then
+        TEMPLATE_F="${d}/hmirun74activity7differences.f"; break
+    fi
+done
 SRC_F="${EXE_DIR}/${EXE}.f"
 if [[ ! -x "$EXE_PATH" ]]; then
     if [[ "$DRY_RUN" == "true" ]]; then
         echo "[DRY-RUN] exe not built yet: ${EXE}"
-        echo "          would generate ${SRC_F} from hmirun74activity7differences.f"
+        echo "          would generate ${SRC_F} from ${TEMPLATE_F:-<template NOT FOUND in ${EXE_DIR}, ${SCRIPT_DIR} or ${COMPARISON_DIR}>}"
         echo "          (sed 's/run74/run${RUN_NUMBER}/g') and compile:"
         echo "           ifort -diag-disable=10448 -o ${EXE} ${EXE}.f"
     else
@@ -90,12 +107,14 @@ if [[ ! -x "$EXE_PATH" ]]; then
             echo "       or build ${EXE} by hand from the run-74 template." >&2
             exit 1
         fi
-        if [[ ! -f "$TEMPLATE_F" ]]; then
-            echo "ERROR: template not found: ${TEMPLATE_F}" >&2
+        if [[ -z "$TEMPLATE_F" ]]; then
+            echo "ERROR: hmirun74activity7differences.f not found in any of:" >&2
+            echo "       ${EXE_DIR}  ${SCRIPT_DIR}  ${COMPARISON_DIR}" >&2
             echo "       Cannot generate ${SRC_F} without it." >&2
             exit 1
         fi
-        echo "Building ${EXE} from the run-74 template..."
+        mkdir -p "$EXE_DIR"
+        echo "Building ${EXE} from ${TEMPLATE_F}..."
         sed "s/run74/run${RUN_NUMBER}/g" "$TEMPLATE_F" > "$SRC_F"
         ( cd "$EXE_DIR" && ifort -diag-disable=10448 -o "$EXE" "${EXE}.f" )
         if [[ ! -x "$EXE_PATH" ]]; then
@@ -107,11 +126,13 @@ if [[ ! -x "$EXE_PATH" ]]; then
 fi
 
 # ── Locate the C-stage input (merge output), unless overridden ───────────────
+# merge_3day_averages.py writes it to COMPARISON_DIR; an older copy in EXE_DIR
+# is the fallback.
 if [[ -n "${ACTIV_FILE:-}" ]]; then
     IN_FILE="$ACTIV_FILE"
 else
-    # newest 3dayaveactivityvalueshmirunNN.*.dat in the exe dir
-    IN_FILE=$(ls -1t "${EXE_DIR}/3dayaveactivityvalueshmirun${RUN_NUMBER}."*.dat 2>/dev/null | head -1 || true)
+    IN_FILE=$(ls -1t "${COMPARISON_DIR}/3dayaveactivityvalueshmirun${RUN_NUMBER}."*.dat 2>/dev/null | head -1 || true)
+    [[ -z "${IN_FILE:-}" ]] && IN_FILE=$(ls -1t "${EXE_DIR}/3dayaveactivityvalueshmirun${RUN_NUMBER}."*.dat 2>/dev/null | head -1 || true)
 fi
 
 if [[ -z "${IN_FILE:-}" || ! -f "$IN_FILE" ]]; then
@@ -122,16 +143,17 @@ if [[ -z "${IN_FILE:-}" || ! -f "$IN_FILE" ]]; then
         EXPECTED="3dayaveactivityvalueshmirun${RUN_NUMBER}.<datestamp>.dat"
         echo "Run ${RUN_NUMBER} activity differences:"
         echo "  exe   : ${EXE_PATH}"
-        echo "  input : ${EXE_DIR}/${EXPECTED}  (not present yet; produced by the merge step)"
+        echo "  input : ${COMPARISON_DIR}/${EXPECTED}  (not present yet; produced by the merge step)"
         echo "  output: ${EXE_DIR}/average7activdiffshmirun${RUN_NUMBER}.dat"
         echo "[DRY-RUN] no C-stage input on disk yet. On a real run the merge step"
         echo "          writes it first; this step would then validate it (17 cols,"
         echo "          contiguous seq, mdidn step 3, yearfract in range) and run:"
         echo "           printf '%s\\n%s\\n' '${EXPECTED}' '<NSETS>' | ./${EXE}"
+        echo "          then copy ${EXE}.f, ${EXE} and the output into ${COMPARISON_DIR}"
         exit 0
     fi
     echo "ERROR: no C-stage input found for run ${RUN_NUMBER}." >&2
-    echo "       Looked for ${EXE_DIR}/3dayaveactivityvalueshmirun${RUN_NUMBER}.*.dat" >&2
+    echo "       Looked for 3dayaveactivityvalueshmirun${RUN_NUMBER}.*.dat in ${COMPARISON_DIR} and ${EXE_DIR}" >&2
     echo "       Run the merge step (merge_3day_averages.py) first, or set ACTIV_FILE." >&2
     exit 1
 fi
@@ -157,10 +179,16 @@ fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "[DRY-RUN] would run (in ${EXE_DIR}):"
     echo "           printf '%s\\n%s\\n' '${IN_BASENAME}' '${NSETS}' | ./${EXE}"
+    echo "          then copy ${EXE}.f, ${EXE} and $(basename "$OUT_FILE") into ${COMPARISON_DIR}"
     exit 0
 fi
 
 # ── Run it: feed the two stdin lines, from the exe directory ─────────────────
+# The exe opens the input by bare name, so it has to sit in EXE_DIR.
+mkdir -p "$EXE_DIR"
+if [[ "$(cd "$(dirname "$IN_FILE")" && pwd)" != "$(cd "$EXE_DIR" && pwd)" ]]; then
+    cp -p "$IN_FILE" "${EXE_DIR}/${IN_BASENAME}"
+fi
 ( cd "$EXE_DIR" && printf '%s\n%s\n' "$IN_BASENAME" "$NSETS" | "./${EXE}" )
 
 # ── Verify the real product (the 0-byte activ7diffs handle is ignored) ───────
@@ -170,3 +198,26 @@ if [[ ! -s "$OUT_FILE" ]]; then
 fi
 OUT_LINES=$(grep -c '' "$OUT_FILE" | tr -d '[:space:]')
 echo "OK: wrote ${OUT_FILE} (${OUT_LINES} lines)."
+
+# ── Copy the program and the product to where Dr. Rhodes keeps them ──────────
+publish() {
+    local src="$1" dst="${COMPARISON_DIR}/$(basename "$1")"
+    [[ -e "$src" ]] || return 0
+    if [[ ! -e "$dst" ]]; then
+        cp -p "$src" "$dst"
+        chgrp erhodes_44 "$dst" 2>/dev/null || true
+        chmod g+rw "$dst" 2>/dev/null || true
+        echo "  copied  ${dst}"
+    elif cmp -s "$src" "$dst"; then
+        echo "  already ${dst} (identical)"
+    else
+        echo "  WARN: ${dst} exists and differs; left untouched." >&2
+        echo "        New copy is at ${src}" >&2
+    fi
+}
+if [[ "$(cd "$EXE_DIR" && pwd)" != "$(cd "$COMPARISON_DIR" && pwd)" ]]; then
+    echo "Copying to ${COMPARISON_DIR}:"
+    publish "$SRC_F"
+    publish "$EXE_PATH"
+    publish "$OUT_FILE"
+fi
