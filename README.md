@@ -77,4 +77,4 @@ python3 pwinauto.py gaps1.fits gaps2.fits MDIDN 0 72 3 45.0
 
 ## Author
 
-Dongpo Bai (Eri) — USC Solar Physics Group, Prof. Edward Rhodes
+Dongpo Bai — USC Solar Physics Group, Prof. Edward Rhodes
