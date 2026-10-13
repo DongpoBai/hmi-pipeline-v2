@@ -69,6 +69,12 @@ python3 pwinauto.py gaps1.fits gaps2.fits MDIDN 0 72 3 45.0
 - Some Fortran binaries (e.g., `bin2widthratiosdp`) need recompilation after CARC environment updates:
   `module load legacy/CentOS7 intel/19.0.4 && ifort -o exehpcc/bin2widthratiosdp src/bin2widthratiosdp.f`
 
+## Third-party code
+
+`fakeDRLINE.c` was written by Cesar Sul (last edited 3/29/2016) and is included unchanged, with his original header. It replaces the IMSL `DRLINE` routine with GSL. As that header asks, publications that use it should include an acknowledgment like:
+
+> This research was supported by Advanced CyberInfrastructure Research and Education Facilitators NSF award ID 1341935
+
 ## Author
 
 Dongpo Bai (Eri) — USC Solar Physics Group, Prof. Edward Rhodes
