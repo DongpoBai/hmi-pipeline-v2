@@ -69,7 +69,7 @@ else
         echo "ERROR: solar-activity-pipeline not found at:" >&2
         echo "  ${GEN}" >&2
         echo "Clone it there, or set ACTIVITY_PIPELINE_DIR:" >&2
-        echo "  git clone https://github.com/HakuyuFujiwara/solar-activity-pipeline.git ${ACTIVITY_PIPELINE_DIR}" >&2
+        echo "  git clone https://github.com/DongpoBai/solar-activity-pipeline.git ${ACTIVITY_PIPELINE_DIR}" >&2
         echo "  (then build its venv per its DEPLOY_HPC.md)" >&2
         exit 1
     fi
